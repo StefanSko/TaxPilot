@@ -19,6 +19,7 @@ beautifulsoup4 = "^4.13.3"
 psutil = "^7.0.0"
 numpy = "^2.2.4"
 pandas = "^2.2.3"
+sentence-transformers = "^3.4.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"

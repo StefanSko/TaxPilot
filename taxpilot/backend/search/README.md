@@ -4,7 +4,7 @@ The search component handles text processing, segmentation, and vector embedding
 
 ## Modules
 
-### Segmentation
+### 1. Segmentation
 
 The segmentation module handles preparing legal text for vector embeddings by:
 
@@ -51,15 +51,73 @@ for segment in segments:
     print()
 ```
 
-#### Optimization
+### 2. Embeddings
 
-The module provides utilities to optimize chunk sizes for different embedding models:
+The embeddings module provides functionality to generate vector embeddings for legal text segments:
+
+1. Loads German language models appropriate for legal text
+2. Generates embeddings efficiently with batching
+3. Stores embeddings with metadata for retrieval
+4. Optimizes for Modal.com serverless environment with GPU acceleration
+
+#### Embedding Models
+
+The module supports several embedding models optimized for German legal text:
+
+- **German BERT** (`deepset/gbert-base`): General-purpose German language model
+- **German BERT Large** (`deepset/gbert-large`): Larger model with more parameters
+- **Multilingual E5** (`intfloat/multilingual-e5-large`): Multilingual model with strong retrieval performance
+- **Legal BERT** (`nlpaueb/legal-bert-base-uncased`): English legal domain model (transferable to German)
+
+#### Usage
 
 ```python
-from taxpilot.backend.search.segmentation import optimize_chunk_size
+from taxpilot.backend.search.embeddings import (
+    EmbeddingConfig, TextEmbedder, EmbeddingProcessor
+)
+from taxpilot.backend.data_processing.database import DbConfig
 
-# For a model with 8k token context
-optimal_size = optimize_chunk_size(model_max_tokens=8192)
+# Configure the embedding process
+config = EmbeddingConfig(
+    model_name="deepset/gbert-base",
+    batch_size=32,
+    use_gpu=True
+)
+
+# Create an embedder for direct embedding
+embedder = TextEmbedder(config)
+
+# Generate embeddings for text
+text = "§ 1 Persönlicher Anwendungsbereich..."
+embedding = embedder.embed_text(text)
+print(f"Embedding shape: {embedding.shape}")
+
+# Process and store embeddings in the database
+db_config = DbConfig(db_path="taxpilot.db")
+embedding_config = EmbeddingConfig(db_config=db_config)
+processor = EmbeddingProcessor(embedding_config)
+
+# Process segments and store embeddings
+embedding_ids = processor.process_segments(segments)
+print(f"Generated and stored {len(embedding_ids)} embeddings")
+```
+
+## Modal.com Integration
+
+TaxPilot uses Modal.com for serverless deployment of embedding generation:
+
+```python
+from taxpilot.infrastructure.embedding_config import app
+
+# Generate embeddings for laws that need them
+with modal.run():
+    # Get laws needing embeddings
+    laws = app.get_laws_needing_embeddings.remote()
+    
+    if laws:
+        # Process laws in batches
+        for batch in [laws[i:i+10] for i in range(0, len(laws), 10)]:
+            app.generate_embeddings_batch.remote(batch)
 ```
 
 ## Design Decisions
@@ -72,24 +130,24 @@ optimal_size = optimize_chunk_size(model_max_tokens=8192)
 
 3. **Overlapping Strategy**: Overlapping between segments ensures that content near segment boundaries isn't lost in embedding space, improving recall for searches that span these boundaries.
 
-4. **Adaptive Chunking**: The paragraph segmenter can adaptively call the sentence segmenter for paragraphs that exceed the maximum chunk size.
+### Embedding Generation
 
-5. **Chunk Size Optimization**: Segments are sized based on the token limitations of the target embedding model, with functions to optimize this relationship.
+1. **German Language Models**: The project uses German-specific embedding models like deepset/gbert-base that understand the nuances of German language, which is essential for legal text.
 
-### Text Cleaning
+2. **GPU Acceleration**: The Modal.com configuration requests GPU acceleration when available, significantly speeding up embedding generation for large corpora.
 
-The module performs several text normalization and cleaning steps:
+3. **Caching and Batching**: Model loading is cached to avoid redundant initialization, and text processing is batched for efficiency.
 
-1. Unicode normalization
-2. OCR error correction for common German legal text issues
-3. Standardization of section and paragraph references
-4. Special formatting for enumerated lists and indentation
+4. **Incremental Updates**: The system tracks which laws already have embeddings, allowing for incremental updates when laws change without reprocessing the entire corpus.
 
-## Future Work
+## Why German BERT?
 
-Planned enhancements include:
+The default embedding model (`deepset/gbert-base`) was chosen for several reasons:
 
-1. **Embedding generation**: Integration with embedding models for generating vector representations
-2. **Optimized vector storage**: Efficient storage and retrieval of embeddings
-3. **Semantic search endpoints**: API endpoints for searching laws by meaning
-4. **Relevance ranking**: Improved ranking of search results based on semantic similarity
+1. **Native German Understanding**: It was trained specifically on German text, understanding German grammar, compound words, and linguistic structures
+2. **Legal Terminology Support**: The training corpus included German Wikipedia and news, which contain significant legal terminology
+3. **Balance of Quality and Performance**: The base version provides good embeddings while being computationally efficient
+4. **Semantic Similarity Capability**: It effectively captures semantic relationships between legal concepts and terms
+5. **Common in German NLP**: Well-tested for German language tasks with established performance metrics
+
+For premium performance, the larger model (`deepset/gbert-large`) can be used, which provides better semantic understanding at the cost of more computation time.
