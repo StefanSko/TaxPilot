@@ -98,13 +98,45 @@ def create_app() -> FastAPI:
         Returns:
             SearchResponse with results.
         """
-        # Placeholder implementation - will be connected to search module
-        return SearchResponse(
-            results=[],
-            total=0,
-            page=request.page,
-            limit=request.limit,
-        )
+        from taxpilot.backend.search.search_api import SearchService
+        
+        # Create search service instance
+        search_service = SearchService()
+        
+        try:
+            # Execute search
+            search_results = search_service.search(
+                query=request.query,
+                filters=request.filters,
+                page=request.page,
+                limit=request.limit,
+                highlight=True,
+                cache=True
+            )
+            
+            # Convert QueryResult objects to SearchResult objects
+            results = [
+                SearchResult(
+                    id=result.id,
+                    law_id=result.law_id,
+                    section_number=result.section_number,
+                    title=result.title,
+                    content=result.content_with_highlights,
+                    relevance_score=result.relevance_score
+                )
+                for result in search_results.results
+            ]
+            
+            # Create and return response
+            return SearchResponse(
+                results=results,
+                total=search_results.total,
+                page=request.page,
+                limit=request.limit,
+            )
+        finally:
+            # Ensure resources are closed
+            search_service.close()
     
     # List laws endpoint
     @app.get("/api/laws", response_model=List[Dict[str, str]])
