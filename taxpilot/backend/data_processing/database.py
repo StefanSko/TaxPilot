@@ -7,7 +7,8 @@ functions for working with DuckDB in a serverless environment.
 
 import os
 from pathlib import Path
-from typing import TypedDict, NotRequired, Any, cast
+from typing import TypedDict, NotRequired, Any, cast, Optional
+from pydantic import BaseModel, Field
 import duckdb
 from datetime import date
 
@@ -43,15 +44,49 @@ class SectionEmbedding(TypedDict):
     embedding: list[float]
 
 
-# Optional database configuration
-class DbConfig(TypedDict):
-    """Database configuration options."""
-    read_only: NotRequired[bool]
-    memory_limit: NotRequired[str]
+# Pydantic models for configuration
+class DbConfig(BaseModel):
+    """Database configuration."""
+    db_path: str = Field(
+        default="data/processed/germanlawfinder.duckdb",
+        description="Path to the DuckDB database file"
+    )
+    read_only: bool = Field(
+        default=False,
+        description="Whether to open the database in read-only mode"
+    )
+    memory_limit: Optional[str] = Field(
+        default=None,
+        description="Memory limit for DuckDB"
+    )
+    
+    @classmethod
+    def from_environment(cls) -> "DbConfig":
+        """
+        Create a configuration from environment variables.
+        
+        Returns:
+            A DbConfig instance with values from environment variables.
+        """
+        if os.getenv("MODAL_ENVIRONMENT") == "modal":
+            # In Modal.com environment, use the mounted volume path
+            db_path = "/data/germanlawfinder.duckdb"
+        elif os.getenv("TEST_DB_PATH"):
+            # Allow tests to specify the database path
+            db_path = os.getenv("TEST_DB_PATH", "")
+        else:
+            # In local development, use a local path
+            db_path = "data/processed/germanlawfinder.duckdb"
+            
+            # Ensure the directory exists
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            
+        return cls(db_path=db_path)
 
 
 # Database singleton connection
 _connection: duckdb.DuckDBPyConnection | None = None
+_config: DbConfig | None = None
 
 
 def get_connection(config: DbConfig | None = None) -> duckdb.DuckDBPyConnection:
@@ -62,30 +97,37 @@ def get_connection(config: DbConfig | None = None) -> duckdb.DuckDBPyConnection:
     across multiple function invocations in the serverless environment.
     
     Args:
-        config: Optional configuration parameters for DuckDB
+        config: Optional configuration for the database connection.
     
     Returns:
         A DuckDB connection object.
     """
-    global _connection
+    global _connection, _config
     
-    if _connection is None:
-        # Determine the database path based on environment
-        if os.getenv("MODAL_ENVIRONMENT") == "modal":
-            # In Modal.com environment, use the mounted volume path
-            db_path = "/data/germanlawfinder.duckdb"
-        else:
-            # In local development, use a local path
-            db_path = "data/processed/germanlawfinder.duckdb"
-            
-            # Ensure the directory exists
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        
-        # Apply configuration options
-        config_dict = {} if config is None else config
-        
-        # Connect to the database
-        _connection = duckdb.connect(db_path, **config_dict)
+    # If a connection exists, return it
+    if _connection is not None:
+        return _connection
+    
+    # If no config is provided, load from environment
+    if config is None:
+        if _config is None:
+            _config = DbConfig.from_environment()
+        config = _config
+    else:
+        _config = config
+    
+    # Create the parent directory if it doesn't exist
+    db_dir = Path(config.db_path).parent
+    db_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Connect to the database with optional parameters
+    connect_params = {}
+    if config.read_only:
+        connect_params["read_only"] = True
+    if config.memory_limit:
+        connect_params["memory_limit"] = config.memory_limit
+    
+    _connection = duckdb.connect(config.db_path, **connect_params)
     
     return _connection
 

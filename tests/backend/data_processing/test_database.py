@@ -6,12 +6,13 @@ This module tests the database connection, schema, and CRUD operations.
 
 import os
 import tempfile
+import json
 from pathlib import Path
 import pytest
 import duckdb
 
 from taxpilot.backend.data_processing.database import (
-    get_connection, close_connection, initialize_database,
+    get_connection, close_connection, initialize_database, DbConfig,
     insert_law, get_law, get_all_laws,
     insert_section, get_section, get_sections_by_law,
     insert_section_embedding, get_section_embedding
@@ -26,51 +27,39 @@ def temp_db_path():
     """Create a temporary database file for testing."""
     # Create a temporary directory
     with tempfile.TemporaryDirectory() as tmpdirname:
-        # Set the environment variable to use the temporary path
+        # Set the database path
         db_path = os.path.join(tmpdirname, "test.duckdb")
         
-        # Store the original value to restore later
-        original_modal_env = os.environ.get("MODAL_ENVIRONMENT")
+        # Store the original connection
+        global_connection = get_connection.__globals__["_connection"]
+        global_config = get_connection.__globals__["_config"]
         
-        # Set environment variables for testing
-        os.environ["MODAL_ENVIRONMENT"] = None
-        os.environ["TEST_DB_PATH"] = db_path
+        # Reset the connection and config
+        get_connection.__globals__["_connection"] = None
+        get_connection.__globals__["_config"] = None
         
-        # Patch the get_connection function to use the test path
-        original_get_connection = get_connection.__globals__["get_connection"]
-        
-        def mock_get_connection(config=None):
-            # For testing, always use the temporary path
-            return duckdb.connect(db_path)
-        
-        get_connection.__globals__["get_connection"] = mock_get_connection
+        # Create a test config
+        test_config = DbConfig(db_path=db_path)
         
         try:
-            yield db_path
+            yield test_config
         finally:
-            # Reset global connection
-            get_connection.__globals__["_connection"] = None
+            # Close the test connection
+            close_connection()
             
-            # Restore the original function
-            get_connection.__globals__["get_connection"] = original_get_connection
-            
-            # Restore environment variables
-            if original_modal_env is not None:
-                os.environ["MODAL_ENVIRONMENT"] = original_modal_env
-            else:
-                os.environ.pop("MODAL_ENVIRONMENT", None)
-            
-            os.environ.pop("TEST_DB_PATH", None)
+            # Restore the original connection and config
+            get_connection.__globals__["_connection"] = global_connection
+            get_connection.__globals__["_config"] = global_config
 
 
 @pytest.fixture
 def db_setup(temp_db_path):
     """Initialize the database schema for testing."""
+    # Use the test config to get a connection
+    conn = get_connection(temp_db_path)
+    
     # Initialize the database
     initialize_database()
-    
-    # Return the connection for testing
-    conn = get_connection()
     
     try:
         yield conn
@@ -130,7 +119,12 @@ def test_insert_and_get_law(db_setup, sample_laws):
     assert retrieved_law["last_updated"] == sample_law["last_updated"]
     assert retrieved_law["issue_date"] == sample_law["issue_date"]
     assert retrieved_law["status_info"] == sample_law["status_info"]
-    assert retrieved_law["metadata"] == sample_law["metadata"]
+    
+    # DuckDB might return the JSON as a string, so we need to check it differently
+    if isinstance(retrieved_law["metadata"], str):
+        assert json.loads(retrieved_law["metadata"]) == sample_law["metadata"]
+    else:
+        assert retrieved_law["metadata"] == sample_law["metadata"]
 
 
 def test_get_all_laws(db_setup, sample_laws):
@@ -173,7 +167,12 @@ def test_insert_and_get_section(db_setup, sample_laws, sample_sections):
     assert retrieved_section["parent_section_id"] == sample_section["parent_section_id"]
     assert retrieved_section["hierarchy_level"] == sample_section["hierarchy_level"]
     assert retrieved_section["path"] == sample_section["path"]
-    assert retrieved_section["metadata"] == sample_section["metadata"]
+    
+    # DuckDB might return the JSON as a string, so we need to check it differently
+    if isinstance(retrieved_section["metadata"], str):
+        assert json.loads(retrieved_section["metadata"]) == sample_section["metadata"]
+    else:
+        assert retrieved_section["metadata"] == sample_section["metadata"]
 
 
 def test_get_sections_by_law(db_setup, sample_laws, sample_sections):
@@ -224,7 +223,8 @@ def test_insert_and_get_embedding(db_setup, sample_laws, sample_sections):
     assert retrieved_embedding is not None
     assert retrieved_embedding["section_id"] == sample_embedding["section_id"]
     assert len(retrieved_embedding["embedding"]) == len(sample_embedding["embedding"])
-    # Check a few values in the embedding vector
-    assert retrieved_embedding["embedding"][0] == sample_embedding["embedding"][0]
-    assert retrieved_embedding["embedding"][10] == sample_embedding["embedding"][10]
-    assert retrieved_embedding["embedding"][-1] == sample_embedding["embedding"][-1]
+    
+    # For floating-point values, use approximate equality
+    assert abs(retrieved_embedding["embedding"][0] - sample_embedding["embedding"][0]) < 1e-6
+    assert abs(retrieved_embedding["embedding"][10] - sample_embedding["embedding"][10]) < 1e-6
+    assert abs(retrieved_embedding["embedding"][-1] - sample_embedding["embedding"][-1]) < 1e-6
