@@ -1,0 +1,35 @@
+Set up the Vue.js 3 frontend project for GermanLawFinder. Create:
+
+1. A Vue.js 3 project with:
+   - Vite as the build tool
+   - Composition API configuration
+   - TypeScript support
+   - Vuetify 3 for UI components
+   - Pinia for state management
+   - Vue Router for navigation
+
+2. Implement project structure:
+   - Directory organization for components, views, stores
+   - Consistent naming conventions
+   - Import aliases for clean imports
+   - CSS/SCSS structure with variables for theming
+
+3. Configure development tools:
+   - ESLint for code quality
+   - Prettier for code formatting
+   - Vitest for unit testing
+   - Vue DevTools integration
+
+4. Set up API client:
+   - Axios configuration for backend communication
+   - API service layer with typed endpoints
+   - Request/response interceptors
+   - Error handling utilities
+
+5. Create basic layout:
+   - Main application layout with navigation
+   - Responsive design foundation
+   - Theme configuration (light/dark modes)
+   - Basic accessibility setup
+
+The project should follow Vue.js best practices and be optimized for code quality and maintainability. Use TypeScript throughout with proper type definitions. Include documentation for the project structure and key architectural decisions.

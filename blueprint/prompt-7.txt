@@ -1,0 +1,24 @@
+Implement text segmentation functionality to prepare legal text for vector embeddings. Create:
+
+1. A segmentation module that:
+   - Breaks down legal texts into appropriate chunks for embedding
+   - Considers semantic boundaries (paragraphs, sections)
+   - Handles overlapping windows for better context preservation
+   - Retains metadata about source location
+
+2. Implement different segmentation strategies for:
+   - Section-level segmentation (for broad search)
+   - Paragraph-level segmentation (for detailed search)
+   - Sentence-level segmentation (for precise matching)
+
+3. Create utility functions to:
+   - Clean and normalize text before segmentation
+   - Handle special characters and formatting in legal texts
+   - Optimize chunk sizes for chosen embedding models
+
+4. Build a test suite that:
+   - Validates segmentation quality on sample laws
+   - Measures segmentation performance
+   - Compares different segmentation strategies
+
+The implementation should intelligently handle German legal text structure, including numbered items, indentation, and references. Optimize for the specific characteristics of legal language while ensuring segments maintain sufficient context for meaningful embeddings. Use Python 3.12 type hints throughout and document the design choices.

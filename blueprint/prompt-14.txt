@@ -1,0 +1,33 @@
+Implement the integration between the Vue.js frontend and FastAPI backend for GermanLawFinder. Create:
+
+1. An API service layer that:
+   - Provides typed functions for all backend API calls
+   - Handles authentication headers and tokens
+   - Implements request/response interceptors
+   - Manages error handling and retry logic
+
+2. Create Pinia stores for:
+   - Search state and actions
+   - User authentication
+   - Application configuration
+   - Search history and bookmarks
+
+3. Implement data transformation utilities:
+   - Convert API responses to frontend models
+   - Format dates and specialized legal text
+   - Normalize search results for display
+   - Handle different response formats
+
+4. Add request optimization:
+   - Implement request cancellation for superseded searches
+   - Add debouncing for search input
+   - Cache common responses
+   - Handle offline mode and reconnection
+
+5. Create error handling components:
+   - Error message display
+   - Retry functionality
+   - Fallback content for failed requests
+   - User-friendly error messages
+
+The implementation should follow best practices for frontend-backend communication and handle real-world scenarios like slow networks, intermittent failures, and concurrent requests. Use TypeScript throughout with proper typing of API responses and requests. Include comprehensive error handling and logging.

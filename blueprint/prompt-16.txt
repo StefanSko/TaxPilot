@@ -1,0 +1,36 @@
+Implement user authentication components for the GermanLawFinder frontend. Create:
+
+1. Authentication views:
+   - LoginView with email/password form
+   - RegisterView for new user registration
+   - ForgotPasswordView for password reset
+   - ProfileView for user information management
+   - SubscriptionView for plan management
+
+2. Create an AuthStore using Pinia:
+   - User state management
+   - Login/logout actions
+   - Token storage and refresh
+   - Authentication status tracking
+   - Role and permission checking
+
+3. Implement authentication components:
+   - LoginForm with validation
+   - RegisterForm with terms acceptance
+   - PasswordResetForm
+   - ProfileEditForm
+   - EmailVerificationHandler
+
+4. Add authentication guards:
+   - Route protection based on authentication status
+   - Feature access control based on subscription
+   - Premium content indicators
+   - Upgrade prompts for free users
+
+5. Create user feedback components:
+   - Authentication error messages
+   - Success notifications
+   - Session timeout warnings
+   - Subscription status indicators
+
+Ensure the authentication flow is intuitive and secure, with proper validation and error handling. The implementation should provide a smooth user experience while maintaining security best practices. Use TypeScript throughout with proper type definitions and follow Vue.js best practices for form handling and state management.

@@ -1,0 +1,30 @@
+Integrate the web scraper, XML parser, and database components into a cohesive data pipeline. Create:
+
+1. A pipeline module that:
+   - Orchestrates the entire data processing flow
+   - Triggers the scraper to collect law data
+   - Passes scraped XML to the parser
+   - Stores parsed data in DuckDB
+   - Handles incremental updates
+
+2. Implement scheduling functionality that:
+   - Runs the pipeline on a regular basis (monthly)
+   - Detects and processes only changed laws
+   - Maintains consistency between raw data and processed data
+
+3. Create a tracking system for:
+   - Pipeline execution history
+   - Processing statistics (execution time, items processed)
+   - Error logging and reporting
+
+4. Implement transaction handling to ensure:
+   - Atomic updates to the database
+   - Consistent state between raw and processed data
+   - Rollback capabilities in case of failures
+
+5. Add a Modal.com scheduled function to:
+   - Run the pipeline automatically
+   - Send notifications on completion or failure
+   - Store execution logs
+
+The pipeline should be designed to run efficiently in the Modal.com serverless environment and handle potential interruptions gracefully. Include proper error handling, logging, and status reporting. Ensure strong typing with Python 3.12 type hints throughout.

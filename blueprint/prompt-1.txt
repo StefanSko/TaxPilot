@@ -1,0 +1,22 @@
+Create the initial structure for the GermanLawFinder project. Set up a Python 3.12 project with the following:
+
+1. Create a directory structure that separates:
+   - Backend (API, data processing, search functionality)
+   - Frontend (Vue.js application)
+   - Infrastructure (Modal.com configuration)
+   - Data (storage for scraped content and processed data)
+   - Tests
+
+2. Initialize a Python project with:
+   - pyproject.toml for Poetry dependency management
+   - Required dependencies: fastapi, uvicorn, lxml, python-dotenv, modal, duckdb, pydantic
+   - Dev dependencies: pytest, black, flake8, mypy
+
+3. Create a basic README.md with:
+   - Project description
+   - Setup instructions
+   - Development guidelines
+
+The project should follow modern Python practices with strong typing (Python 3.12) and a clean, maintainable structure. Include a .gitignore file suitable for Python and Vue.js development.
+
+Output the complete directory structure and the content of key configuration files.

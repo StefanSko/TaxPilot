@@ -1,0 +1,32 @@
+Implement a basic search API endpoint for GermanLawFinder using FastAPI. Create:
+
+1. A search API module that:
+   - Defines search request and response models using Pydantic
+   - Implements a search endpoint (/api/search)
+   - Handles query processing for vector search
+   - Returns structured search results with pagination
+
+2. Create query processing logic that:
+   - Converts user queries to embeddings
+   - Performs vector similarity search
+   - Retrieves matching sections from DuckDB
+   - Handles basic filtering (by law, section)
+
+3. Implement response formatting:
+   - Structured JSON responses with search results
+   - Highlighting of matching text
+   - Inclusion of context around matches
+   - Metadata about the search results
+
+4. Add basic error handling:
+   - Input validation
+   - Error responses with meaningful messages
+   - Timeout handling for long-running searches
+   - Logging of search errors
+
+5. Implement simple performance optimizations:
+   - Result caching for common queries
+   - Efficient pagination
+   - Request validation and normalization
+
+The API should follow RESTful principles and include comprehensive OpenAPI documentation. Ensure the implementation is efficient for serverless execution in Modal.com. Use Python 3.12 type hints throughout and include thorough error handling and logging.

@@ -1,0 +1,20 @@
+Design and implement the DuckDB schema for the GermanLawFinder project, based on the technical specification. Create:
+
+1. A database.py module that:
+   - Connects to DuckDB using the Modal volume from the previous step
+   - Handles database initialization and migrations
+   - Provides connection management utilities
+
+2. Implement the schema for the core tables as specified in the technical specification:
+   - laws table: Store metadata about each law (id, full_name, abbreviation, etc.)
+   - sections table: Store individual sections with hierarchical structure
+   - section_embeddings table: Store vector embeddings for search functionality
+
+3. Create utility functions for:
+   - Database initialization
+   - Schema migration
+   - Basic CRUD operations for laws and sections
+
+4. Implement sample data insertion for at least one law (e.g., EStG) to test the schema
+
+Ensure the implementation uses Python 3.12 type hints throughout and follows best practices for working with DuckDB in a serverless environment. Include docstrings for all functions and classes.

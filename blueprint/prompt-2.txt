@@ -1,0 +1,20 @@
+Using the project structure created in the previous step, set up Modal.com configuration for serverless deployment of the GermanLawFinder backend. Implement:
+
+1. Create a modal_config.py file that:
+   - Defines a Modal app for the project
+   - Sets up a persistent volume for DuckDB storage
+   - Creates a web endpoint for the FastAPI application
+   - Configures appropriate compute resources (CPU/memory)
+
+2. Create a simple FastAPI application skeleton (app.py) with:
+   - Basic routing structure
+   - Health check endpoint (/health)
+   - OpenAPI documentation setup
+   - CORS middleware configuration
+
+3. Implement a deployment script that:
+   - Creates necessary Modal resources
+   - Deploys the FastAPI application
+   - Outputs the deployment URL
+
+Ensure the Modal configuration is optimized for Python 3.12 and follows serverless best practices. Include comments explaining key configuration decisions and how to customize the setup for different environments (development, staging, production).

@@ -1,0 +1,32 @@
+Implement citation generation functionality for GermanLawFinder. Create:
+
+1. A citation module that:
+   - Generates properly formatted citations for German tax laws
+   - Supports multiple citation formats (academic, legal practice)
+   - Creates citations at different levels (law, section, paragraph)
+   - Handles special citation rules for German legal texts
+
+2. Create backend endpoints:
+   - Citation generation (/api/citations/generate)
+   - Citation format options (/api/citations/formats)
+   - Citation export (/api/citations/export)
+
+3. Implement frontend components:
+   - CitationButton in result displays
+   - CitationDialog with format options
+   - CopyToClipboard functionality
+   - ExportCitation for different formats
+
+4. Add utility functions:
+   - Format detection and validation
+   - Citation parsing for search
+   - Normalization of citation formats
+   - Citation validation
+
+5. Create export options:
+   - Plain text format
+   - Rich text format
+   - Citation collection export
+   - Bibliography generation
+
+Ensure the citation formats follow German legal standards and conventions. The implementation should make it easy for legal professionals to generate accurate citations for their research. Use TypeScript for frontend components and Python 3.12 type hints for backend code.

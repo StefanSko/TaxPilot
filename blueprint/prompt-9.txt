@@ -1,0 +1,26 @@
+Implement vector database integration for efficient semantic search. Create:
+
+1. A vector database module that:
+   - Integrates with Pinecone or Qdrant (choose one with explanation)
+   - Handles creation and management of vector indices
+   - Provides functions for vector storage and retrieval
+   - Maintains metadata alongside vectors for result filtering
+
+2. Implement database management utilities:
+   - Index creation and configuration
+   - Batch upsert operations for embeddings
+   - Index optimization and maintenance
+   - Backup and restore functionality
+
+3. Create a data synchronization system:
+   - Ensure consistency between DuckDB and vector database
+   - Handle updates when laws change
+   - Implement versioning for embeddings
+
+4. Add search functionality:
+   - Vector similarity search with configurable parameters
+   - Metadata filtering options (by law, section, date)
+   - Result scoring and ranking
+   - Pagination and result limiting
+
+The implementation should be optimized for serverless deployment on Modal.com, with efficient connection management and appropriate error handling. Include comprehensive documentation of the vector database configuration and usage. Use Python 3.12 type hints throughout and follow best practices for API design.

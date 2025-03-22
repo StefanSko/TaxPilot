@@ -1,0 +1,38 @@
+Develop the search interface for the GermanLawFinder Vue.js frontend. Create:
+
+1. A SearchView component that:
+   - Provides a clean, intuitive search interface
+   - Includes a prominent search input
+   - Offers basic filtering options (by law)
+   - Shows search status and loading indicators
+
+2. Implement a SearchBar component:
+   - Text input with autocomplete suggestions
+   - Search history dropdown
+   - Clear button and keyboard shortcuts
+   - Visual feedback during typing
+
+3. Create FilterControls component:
+   - Law selection dropdown
+   - Section/article filter options
+   - Filter tags display
+   - Clear filters functionality
+
+4. Develop SearchResults component:
+   - Results list with clean formatting
+   - Highlighting of matched terms
+   - Section context display
+   - Pagination controls
+
+5. Implement Pinia store for search:
+   - State management for search queries
+   - Actions for performing searches
+   - Storage of recent searches
+   - Loading and error states
+
+6. Add responsive design:
+   - Mobile-friendly layout
+   - Adaptive components based on screen size
+   - Touch-friendly controls for mobile users
+
+Ensure the interface is clean, professional, and optimized for legal professionals. Focus on usability and efficiency, allowing users to quickly find relevant legal information. Use TypeScript throughout with proper type definitions and follow Vue.js best practices.

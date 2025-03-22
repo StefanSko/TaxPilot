@@ -1,0 +1,34 @@
+Implement bookmarking and annotation features for GermanLawFinder. Create:
+
+1. Database models for:
+   - Bookmarks (user, section reference, timestamp, tags)
+   - Annotations (user, section reference, text, position, timestamp)
+   - Collections (user-defined groups of bookmarks)
+   - Tags (user-defined categorization)
+
+2. Create API endpoints:
+   - Bookmark management (/api/bookmarks)
+   - Annotation CRUD (/api/annotations)
+   - Collection management (/api/collections)
+   - Tag management (/api/tags)
+
+3. Implement frontend components:
+   - BookmarkButton for adding/removing bookmarks
+   - AnnotationEditor for creating and editing annotations
+   - BookmarksList for displaying saved items
+   - CollectionsManager for organizing bookmarks
+   - TagsInput for categorizing saved content
+
+4. Create Pinia stores:
+   - BookmarksStore for managing bookmark state
+   - AnnotationsStore for annotation operations
+   - CollectionsStore for collection management
+   - Synchronization with backend API
+
+5. Add organization features:
+   - Search within bookmarks and annotations
+   - Filtering by tags and collections
+   - Sorting options (date, law, alphabetical)
+   - Export functionality for saved items
+
+The implementation should provide a seamless experience for users to save, organize, and retrieve important legal content. Follow best practices for state management and ensure proper synchronization between frontend and backend. Use TypeScript for frontend components and Python 3.12 type hints for backend code.

@@ -1,0 +1,33 @@
+Implement production deployment configuration for GermanLawFinder. Create:
+
+1. Modal.com production setup:
+   - Configure production environment in Modal.com
+   - Set up appropriate compute resources (CPU/memory)
+   - Configure production secrets and environment variables
+   - Implement proper volume mounting for persistent data
+
+2. Frontend deployment:
+   - Create production build configuration
+   - Set up static hosting (Netlify, Vercel, or similar)
+   - Configure CDN for assets
+   - Implement caching strategies
+
+3. CI/CD pipeline:
+   - GitHub Actions workflow for automated deployment
+   - Staging and production deployment targets
+   - Automated testing before deployment
+   - Rollback mechanisms for failed deployments
+
+4. Monitoring and logging:
+   - Set up application monitoring
+   - Configure error tracking (Sentry or similar)
+   - Implement structured logging
+   - Create alerting for critical issues
+
+5. Backup and disaster recovery:
+   - Configure database backups
+   - Implement data recovery procedures
+   - Set up failover mechanisms
+   - Create incident response plan
+
+The deployment configuration should ensure reliability, scalability, and security in production. Include comprehensive documentation of the deployment process, environment configuration, and maintenance procedures. Ensure all security best practices are followed for production environments.

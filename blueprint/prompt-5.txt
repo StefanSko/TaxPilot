@@ -1,0 +1,25 @@
+Implement an XML parser for German legal documents based on the scraped data. Create:
+
+1. A parser module that:
+   - Uses lxml to efficiently parse the German law XML format from gesetze-im-internet.de
+   - Handles the specific DTD-based structure (gii-norm.dtd)
+   - Processes key elements like <norm>, <metadaten>, <textdaten>, <table>
+   - Extracts structured data preserving the hierarchical relationships
+
+2. Create data models using Pydantic that represent:
+   - Law metadata (abbreviation, full title, issue date, etc.)
+   - Section structure (section number, title, content)
+   - Hierarchical relationships between sections
+
+3. Implement parsing functions that:
+   - Extract metadata from <metadaten> elements
+   - Process content from <textdaten> elements
+   - Handle special XML elements like tables and formatting tags
+   - Normalize text and clean up XML artifacts
+
+4. Create a processing pipeline that:
+   - Takes raw XML files from the scraper
+   - Parses them into structured Pydantic models
+   - Prepares the data for insertion into DuckDB
+
+Include comprehensive error handling and logging. The parser should be robust against variations in the XML structure and gracefully handle unexpected elements or formatting. Use Python 3.12's type annotations throughout and include thorough documentation of the parsing logic.

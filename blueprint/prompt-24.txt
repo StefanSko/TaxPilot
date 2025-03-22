@@ -1,0 +1,33 @@
+Implement analytics and monitoring for GermanLawFinder. Create:
+
+1. User behavior analytics:
+   - Implement event tracking for key user actions
+   - Create search analytics (queries, refinements, success rates)
+   - Track feature usage and adoption
+   - Set up funnel analysis for subscription conversion
+
+2. System performance monitoring:
+   - Configure response time tracking for API endpoints
+   - Set up serverless function execution metrics
+   - Monitor database performance and query times
+   - Implement resource utilization tracking
+
+3. Business metrics:
+   - Create dashboard for key performance indicators
+   - Set up subscription and revenue tracking
+   - Implement user retention analysis
+   - Configure growth and adoption metrics
+
+4. Operational monitoring:
+   - Set up error rate tracking and alerting
+   - Implement availability monitoring
+   - Create log aggregation and analysis
+   - Configure proactive alerting for issues
+
+5. Reporting functionality:
+   - Create periodic reports generation
+   - Implement export capabilities for metrics
+   - Set up scheduled reporting delivery
+   - Create visualization components for key metrics
+
+The implementation should balance comprehensive analytics with privacy considerations, ensuring GDPR compliance. Include documentation of tracked metrics and their business significance. Ensure the monitoring system provides actionable insights for both technical operations and business development.

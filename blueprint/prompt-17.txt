@@ -1,0 +1,33 @@
+Implement boolean search capabilities for the GermanLawFinder backend. Create:
+
+1. A query parser module that:
+   - Parses complex search queries with boolean operators (AND, OR, NOT)
+   - Handles quoted phrases for exact matching
+   - Supports wildcards and fuzzy matching
+   - Processes parentheses for grouping expressions
+
+2. Create SQL query builder:
+   - Converts parsed queries to DuckDB SQL statements
+   - Implements efficient full-text search
+   - Handles different operator precedence
+   - Optimizes query execution
+
+3. Implement search API enhancements:
+   - Update search endpoint to support boolean queries
+   - Add query validation and normalization
+   - Provide query suggestion functionality
+   - Include explanation of query interpretation
+
+4. Create combined search functionality:
+   - Merge boolean and vector search results
+   - Implement hybrid ranking algorithm
+   - Balance precision and recall for legal search
+   - Allow configurable search modes
+
+5. Add performance optimizations:
+   - Query caching for common patterns
+   - Execution plan optimization
+   - Parallel processing where appropriate
+   - Result post-processing for relevance
+
+The implementation should be optimized for legal search scenarios, with special attention to German language specifics. Include comprehensive documentation of the query syntax and capabilities. Use Python 3.12 type hints throughout and follow best practices for search implementation.

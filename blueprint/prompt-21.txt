@@ -1,0 +1,33 @@
+Implement comprehensive security measures for GermanLawFinder. Create:
+
+1. Data protection mechanisms:
+   - Implement TLS/SSL configuration for all API endpoints
+   - Set up AES-256 encryption for sensitive data at rest
+   - Configure secure cookie handling with HttpOnly and Secure flags
+   - Implement content security policies
+
+2. Authentication security:
+   - Enhance password hashing with proper salt and work factors
+   - Implement multi-factor authentication (email, authenticator app)
+   - Create secure password reset flows
+   - Add session timeout and automatic logout
+
+3. API security:
+   - Implement rate limiting for all endpoints
+   - Add request validation and sanitization
+   - Configure CORS with appropriate restrictions
+   - Set up API key validation for external access
+
+4. Infrastructure security:
+   - Configure WAF (Web Application Firewall) rules
+   - Implement DDoS protection measures
+   - Set up IP blocking for suspicious activity
+   - Create security monitoring and alerting
+
+5. GDPR compliance:
+   - Implement data privacy controls
+   - Create data export functionality
+   - Add right to be forgotten implementation
+   - Set up consent management
+
+The implementation should follow security best practices and address the specific requirements for legal applications handling sensitive user data. Include comprehensive documentation of the security measures and configurations. Use Python 3.12 type hints for backend code and ensure all frontend security measures follow current best practices.

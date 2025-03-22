@@ -1,0 +1,34 @@
+Develop comprehensive result display components for the GermanLawFinder frontend. Create:
+
+1. A ResultCard component that:
+   - Displays law section information clearly
+   - Shows section title, number, and law source
+   - Highlights matched terms in the content
+   - Provides context around the matches
+   - Includes expansion/collapse functionality
+
+2. Implement a DetailView component:
+   - Shows the full content of a selected result
+   - Displays hierarchical context (parent sections)
+   - Provides navigation to related sections
+   - Includes proper formatting of legal text structure
+
+3. Create a ResultsList component:
+   - Renders a list of ResultCard components
+   - Handles different result types and formats
+   - Implements virtual scrolling for performance
+   - Provides sorting options (relevance, section number)
+
+4. Develop ContentFormatter utility:
+   - Properly formats legal text with indentation
+   - Handles special characters and formatting
+   - Preserves paragraph structure
+   - Renders tables and lists correctly
+
+5. Add interactive features:
+   - Bookmark/save functionality
+   - Copy citation button
+   - Print/export options
+   - Sharing capabilities
+
+Ensure components follow accessibility best practices and render correctly across different devices and screen sizes. Use TypeScript throughout with proper type definitions. The components should provide a professional, clean presentation of legal content optimized for readability and usability by tax attorneys.

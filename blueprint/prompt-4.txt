@@ -1,0 +1,24 @@
+Develop a web scraper for extracting German tax laws from government websites. Create:
+
+1. A scraper module that:
+   - Uses Requests and BeautifulSoup or Scrapy
+   - Targets gesetze-im-internet.de to extract the 5 key tax laws (EStG, KStG, UStG, AO, GewStG)
+   - Handles pagination and navigation through the website structure
+   - Downloads the XML files containing the law content
+
+2. Implement a scraper scheduler that:
+   - Runs monthly to check for updates
+   - Detects changes in the laws compared to previous versions
+   - Logs scraping activities and results
+
+3. Create storage utilities to:
+   - Save raw XML files to a consistent location
+   - Track metadata about each download (timestamp, source URL, etc.)
+   - Handle versioning of law content
+
+4. Implement error handling for:
+   - Network issues
+   - Structure changes in the source website
+   - Invalid or incomplete content
+
+Focus on creating a robust scraper that can reliably extract the needed content and detect when laws have been updated. Include logging and error reporting to facilitate monitoring. Ensure the code follows Python 3.12 conventions with proper type hints and documentation.

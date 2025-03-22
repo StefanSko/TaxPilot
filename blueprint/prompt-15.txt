@@ -1,0 +1,34 @@
+Implement user authentication functionality for the GermanLawFinder backend. Create:
+
+1. A users module that:
+   - Defines user models using Pydantic
+   - Implements database schema for user storage in DuckDB
+   - Provides user management functions (create, read, update)
+   - Handles password hashing using bcrypt
+
+2. Create authentication endpoints:
+   - User registration (/api/auth/register)
+   - Login (/api/auth/login)
+   - Password reset (/api/auth/reset-password)
+   - User profile (/api/auth/profile)
+   - Logout (/api/auth/logout)
+
+3. Implement JWT authentication:
+   - Token generation and validation
+   - Refresh token mechanism
+   - Token expiration and rotation
+   - Secure cookie handling
+
+4. Add security features:
+   - Email verification flow
+   - Rate limiting for authentication attempts
+   - IP tracking for suspicious activity
+   - Session management and revocation
+
+5. Create role-based access control:
+   - Role definition (free user, paid subscriber, admin)
+   - Permission checking middleware
+   - Role assignment and management
+   - Subscription status tracking
+
+The implementation should follow security best practices for authentication and user data protection. Ensure proper validation of user inputs and secure handling of sensitive information. Use Python 3.12 type hints throughout and include comprehensive error handling and logging.
