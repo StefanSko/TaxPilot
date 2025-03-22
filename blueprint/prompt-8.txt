@@ -1,0 +1,25 @@
+Implement vector embedding generation for German legal text segments. Create:
+
+1. An embeddings module that:
+   - Uses a German language model appropriate for legal text (e.g., German BERT/RoBERTa or a legal domain-specific model)
+   - Generates embeddings for text segments created in the previous step
+   - Optimizes embedding computation for Modal.com's serverless environment
+   - Handles batching for efficient processing
+
+2. Implement model management utilities:
+   - Model loading and caching
+   - Version tracking for embedding models
+   - Configuration for different embedding dimensions and parameters
+
+3. Create a processing pipeline that:
+   - Takes segmented legal texts as input
+   - Generates embeddings for each segment
+   - Stores embeddings with metadata in the section_embeddings table
+   - Handles incremental updates when laws change
+
+4. Add performance optimization:
+   - GPU acceleration when available
+   - Efficient batching of embedding requests
+   - Caching to avoid redundant computation
+
+Use Modal.com's GPU capabilities when appropriate for accelerating the embedding generation. Ensure the embedding process is robust to different text lengths and formats. Document the choice of embedding model and parameters, with an explanation of why they're suitable for German legal text. Use Python 3.12 type hints throughout and include thorough error handling.
