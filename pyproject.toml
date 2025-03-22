@@ -1,14 +1,43 @@
 [tool.poetry]
 name = "taxpilot"
 version = "0.1.0"
-description = ""
+description = "GermanLawFinder - A modern legal research platform for German tax laws"
 authors = ["StefanSko <Stefan.sko@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.12"
+fastapi = "^0.110.0"
+uvicorn = "^0.28.0"
+lxml = "^5.1.0"
+python-dotenv = "^1.0.1"
+modal = "^0.57.11"
+duckdb = "^0.10.0"
+pydantic = "^2.6.3"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+black = "^24.2.0"
+flake8 = "^7.0.0"
+mypy = "^1.7.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.mypy]
+python_version = "3.12"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_return_any = true

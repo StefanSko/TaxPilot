@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+.env
+.venv
+ENV/
+
+# Tests
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+coverage.xml
+*.cover
+
+# Poetry
+.poetry/
+
+# MyPy
+.mypy_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# DuckDB
+*.duckdb
+*.duckdb.wal
+
+# Vue.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+frontend/dist
+frontend/.cache/
+
+# Modal.com
+.modal/
+
+# Project specific
+data/processed/
