@@ -76,6 +76,7 @@ class ScraperConfig(BaseModel):
         default=5,
         description="Number of retry attempts for HTTP requests"
     )
+    verify_ssl: bool = Field(default=False, description="Verify SSL certificates when scraping")
     
     @property
     def laws_to_scrape(self) -> dict[str, str]:
@@ -144,9 +145,9 @@ def get_law_url(law_id: str, config: ScraperConfig) -> str:
     return f"{config.base_url}/{law_id}/"
 
 
-def scrape_law_page(session: requests.Session, law_id: str, config: ScraperConfig) -> tuple[str | None, str | None]:
+def scrape_law_page(session: requests.Session, law_id: str, config: ScraperConfig) -> str | None:
     """
-    Scrape the law page to find the XML download link.
+    Get the direct XML download link for a law.
     
     Args:
         session: The requests session.
@@ -155,44 +156,26 @@ def scrape_law_page(session: requests.Session, law_id: str, config: ScraperConfi
         
     Returns:
         A tuple containing (xml_url, last_updated_date) or (None, None) if not found.
+        The last_updated_date will always be None with this direct approach.
     """
     url = get_law_url(law_id, config)
-    logger.info(f"Scraping law page: {url}")
+    xml_url = f"{url}xml.zip"
+    
+    logger.info(f"Trying direct XML URL: {xml_url}")
     
     try:
-        response = session.get(url, timeout=config.timeout)
+        # Try to access the XML zip file directly
+        response = session.head(xml_url, timeout=config.timeout, verify=config.verify_ssl)
         response.raise_for_status()
         
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # If we get here, the URL exists
+        logger.info(f"Found direct XML URL: {xml_url}")
         
-        # Find the XML download link
-        # The XML link is typically in a section with downloads
-        xml_link = None
-        for link in soup.find_all('a'):
-            href = link.get('href')
-            if href and href.endswith('.xml'):
-                xml_link = href
-                break
-                
-        if not xml_link:
-            logger.warning(f"No XML link found for {law_id}")
-            return None, None
-            
-        # Make the XML URL absolute if it's relative
-        if not xml_link.startswith('http'):
-            xml_link = f"{config.base_url}/{xml_link}" if not xml_link.startswith('/') else f"{config.base_url}{xml_link}"
-        
-        # Extract the last updated date if available
-        last_updated = None
-        update_text = soup.find('div', class_='jnStand')
-        if update_text:
-            last_updated = update_text.text.strip()
-            
-        return xml_link, last_updated
-        
+        # Return the URL without attempting to get a date
+        return xml_url
     except requests.RequestException as e:
-        logger.error(f"Error accessing {url}: {e}")
-        return None, None
+        logger.error(f"Error accessing {xml_url}: {e}")
+        return None
 
 
 def download_xml(session: requests.Session, url: str, law_id: str, config: ScraperConfig) -> Path | None:
@@ -211,7 +194,7 @@ def download_xml(session: requests.Session, url: str, law_id: str, config: Scrap
     logger.info(f"Downloading XML from {url}")
     
     try:
-        response = session.get(url, timeout=config.timeout * 2)  # Longer timeout for downloads
+        response = session.get(url, timeout=config.timeout * 2, verify=config.verify_ssl)  # Longer timeout for downloads
         response.raise_for_status()
         
         # Create directory for this law if it doesn't exist
@@ -349,8 +332,7 @@ def scrape_law(law_id: str, config: ScraperConfig) -> DownloadResult:
     
     try:
         # Get the XML download URL
-        xml_url, last_updated = scrape_law_page(session, law_id, config)
-        result.last_updated_website = last_updated
+        xml_url = scrape_law_page(session, law_id, config)
         result.source_url = xml_url
         
         if not xml_url:

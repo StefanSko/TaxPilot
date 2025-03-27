@@ -276,6 +276,9 @@ def run_pipeline(config: PipelineConfig | None = None) -> PipelineResult:
     if config is None:
         config = PipelineConfig()
     
+    # Add this line to disable SSL verification in the scraper config
+    config.scraper_config.verify_ssl = False
+    
     # Start tracking this execution
     tracking_record = start_tracking(config.tracking_config)
     execution_id = tracking_record.execution_id
