@@ -11,6 +11,8 @@ from typing import TypedDict, NotRequired, Any, cast, Optional
 from pydantic import BaseModel, Field
 import duckdb
 from datetime import date
+import logging
+from dataclasses import dataclass
 
 
 # Type definitions using Python 3.12 typing features
@@ -85,50 +87,77 @@ class DbConfig(BaseModel):
 
 
 # Database singleton connection
-_connection: duckdb.DuckDBPyConnection | None = None
-_config: DbConfig | None = None
+_connection: Optional[duckdb.DuckDBPyConnection] = None
+_config: Optional[DbConfig] = None
 
 
-def get_connection(config: DbConfig | None = None) -> duckdb.DuckDBPyConnection:
+def get_connection(config: Optional[DbConfig] = None) -> duckdb.DuckDBPyConnection:
     """
     Get a connection to the DuckDB database.
     
-    This function implements a singleton pattern to reuse the database connection
-    across multiple function invocations in the serverless environment.
+    Ensures the connection is valid and open before returning. Reconnects if necessary.
     
     Args:
         config: Optional configuration for the database connection.
     
     Returns:
-        A DuckDB connection object.
+        A valid, open DuckDB connection object.
     """
     global _connection, _config
     
-    # If a connection exists, return it
+    # Check if current connection is valid
+    connection_is_valid = False
     if _connection is not None:
-        return _connection
-    
-    # If no config is provided, load from environment
-    if config is None:
-        if _config is None:
-            _config = DbConfig.from_environment()
-        config = _config
-    else:
-        _config = config
-    
-    # Create the parent directory if it doesn't exist
-    db_dir = Path(config.db_path).parent
-    db_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Connect to the database with optional parameters
-    connect_params = {}
-    if config.read_only:
-        connect_params["read_only"] = True
-    if config.memory_limit:
-        connect_params["memory_limit"] = config.memory_limit
-    
-    _connection = duckdb.connect(config.db_path, **connect_params)
-    
+        try:
+            # Try a simple query to check validity
+            _connection.execute("SELECT 1")
+            connection_is_valid = True
+            logging.debug("Existing DB connection is valid.")
+        except (duckdb.ConnectionException, duckdb.InterruptException, RuntimeError) as e:
+            logging.warning(f"Existing DB connection is invalid ({type(e).__name__}). Will reconnect.")
+            try:
+                _connection.close()
+            except Exception:
+                pass # Ignore errors closing an already potentially broken connection
+            _connection = None 
+
+    # If connection is not valid or doesn't exist, create a new one
+    if not connection_is_valid:
+        logging.info("Establishing new DB connection...")
+        # If no config is provided, load from environment
+        if config is None:
+            if _config is None:
+                _config = DbConfig()  # Use default constructor
+            config = _config
+        # Store the config used for potential future reconnections
+        elif _config != config:
+             _config = config
+             logging.info(f"DB config updated to: {config}")
+
+        # Create the parent directory if it doesn't exist
+        db_dir = Path(config.db_path).parent
+        db_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Connect to the database with optional parameters
+        connect_params = {}
+        if config.read_only:
+            connect_params["read_only"] = True
+        if config.memory_limit:
+            connect_params["memory_limit"] = config.memory_limit
+        
+        try:
+            _connection = duckdb.connect(config.db_path, **connect_params)
+            logging.info(f"Successfully connected to database at {config.db_path}")
+        except Exception as e:
+            logging.error(f"Fatal error connecting to database: {e}")
+            _connection = None # Ensure connection is None on failure
+            raise
+            
+    # Should always have a valid connection here unless connect failed
+    if _connection is None:
+        # This case should ideally not be reached if connect raises properly
+        raise RuntimeError("Failed to establish a database connection.")
+        
     return _connection
 
 
@@ -137,8 +166,13 @@ def close_connection() -> None:
     global _connection
     
     if _connection is not None:
-        _connection.close()
-        _connection = None
+        try:
+            _connection.close()
+        except Exception as e:
+            logging.error(f"Error closing connection: {e}")
+        finally:
+            _connection = None
+            logging.debug("Database connection closed")
 
 
 def initialize_database() -> None:

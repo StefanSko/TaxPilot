@@ -11,6 +11,7 @@ import unicodedata
 from enum import Enum
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 class SegmentationStrategy(Enum):
@@ -29,7 +30,7 @@ class TextSegment:
     segment_id: str
     start_idx: int
     end_idx: int
-    metadata: dict[str, any]
+    metadata: dict[str, Any]
 
 
 class SegmentationConfig:

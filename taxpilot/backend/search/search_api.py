@@ -11,7 +11,9 @@ It handles:
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Any, Optional, Union, Tuple
+from typing import Any
+import json
+import pandas as pd
 
 from taxpilot.backend.search.embeddings import TextEmbedder
 from taxpilot.backend.search.vector_db import (
@@ -53,13 +55,13 @@ class QueryResult:
     content: str
     content_with_highlights: str
     relevance_score: float
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
 
 @dataclass
 class SearchResults:
     """Container for search results with pagination information."""
-    results: List[QueryResult]
+    results: list[QueryResult]
     total: int
     page: int
     limit: int
@@ -77,9 +79,9 @@ class SearchService:
     
     def __init__(
         self,
-        vector_db: Optional[Union[VectorDatabase, VectorDatabaseManager]] = None,
-        embedder: Optional[TextEmbedder] = None,
-        db_connection: Optional[DatabaseConnection] = None,
+        vector_db: VectorDatabase | VectorDatabaseManager | None = None,
+        embedder: TextEmbedder | None = None,
+        db_connection: DatabaseConnection | None = None,
         cache_size: int = 100
     ):
         """
@@ -97,18 +99,19 @@ class SearchService:
         self.db_connection = db_connection or DatabaseConnection()
         
         # Simple LRU cache for common queries
-        self._cache = {}
+        self._cache: dict[str, SearchResults] = {}
         self._cache_size = cache_size
-        self._cache_order = []
+        self._cache_order: list[str] = []
     
     def search(
         self,
         query: str,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
         page: int = 1,
         limit: int = 10,
         highlight: bool = True,
-        cache: bool = True
+        cache: bool = True,
+        min_score: float = 0.5
     ) -> SearchResults:
         """
         Search for laws matching the query with optional filtering.
@@ -120,6 +123,7 @@ class SearchService:
             limit: Maximum number of results per page
             highlight: Whether to highlight matching text
             cache: Whether to use and update the cache
+            min_score: Minimum relevance score for results
         
         Returns:
             SearchResults object containing the search results
@@ -148,15 +152,14 @@ class SearchService:
             
             # Prepare search parameters
             search_params = SearchParameters(
-                vector=query_embedding,
-                limit=limit,
+                query_vector=query_embedding,
+                top_k=limit,
                 offset=offset,
-                filter_conditions=processed_filters,
-                min_score=0.6  # Configurable threshold
+                min_score=min_score
             )
             
-            # Execute vector search
-            vector_results = self.vector_db.search(search_params)
+            # Execute vector search using the correct manager method
+            vector_results = self.vector_db.search_similar(search_params)
             
             # Enrich results with full content from database
             enriched_results = self._enrich_results(vector_results, query, highlight)
@@ -189,7 +192,7 @@ class SearchService:
                 execution_time_ms=0
             )
     
-    def _process_filters(self, filters: Dict[str, Any]) -> Dict[str, Any]:
+    def _process_filters(self, filters: dict[str, Any]) -> dict[str, Any]:
         """
         Process and validate search filters.
         
@@ -217,10 +220,10 @@ class SearchService:
     
     def _enrich_results(
         self, 
-        vector_results: List[SearchResult],
+        vector_results: list[SearchResult],
         query: str,
         highlight: bool
-    ) -> List[QueryResult]:
+    ) -> list[QueryResult]:
         """
         Enrich vector search results with full content and highlighting.
         
@@ -237,7 +240,7 @@ class SearchService:
             return []
             
         # Get segment IDs to retrieve from database
-        segment_ids = [result.segment_id for result in vector_results]
+        segment_ids: list[str] = [result.segment_id for result in vector_results]
         
         # Retrieve full content for all segments
         segment_content = self._get_segments_content(segment_ids)
@@ -270,65 +273,141 @@ class SearchService:
             
         return enriched_results
     
-    def _get_segments_content(self, segment_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    def _get_segments_content(self, segment_ids: list[str]) -> dict[str, dict[str, Any]]:
         """
-        Retrieve full content for segments from database.
+        Retrieve full content and metadata for segments from database.
         
         Args:
-            segment_ids: List of segment IDs to retrieve
+            segment_ids: List of segment IDs to retrieve (format: {section_id}_p{N} or similar)
             
         Returns:
-            Dictionary mapping segment IDs to content
+            Dictionary mapping segment IDs to content and metadata
         """
         if not segment_ids:
             return {}
             
-        # Placeholder for actual database retrieval
-        # In a real implementation, this would query DuckDB
-        # for the full content of the segments
+        conn = self.db_connection.get_connection()
+        segments_data = {}
         
-        with self.db_connection.get_connection() as conn:
-            # Execute query to get segment content
-            segments_data = {}
+        # Extract section_ids from segment_ids for efficient lookup
+        section_ids = set()
+        for seg_id in segment_ids:
+            # Assuming segment_id format like section_id_suffix
+            parts = seg_id.split('_')
+            if len(parts) > 1:
+                 # Reconstruct potential section_id (might need adjustment based on actual ID format)
+                 section_id = parts[0] 
+                 # Example: If section ID itself contains _, this needs a more robust parser
+                 # For now, assume the first part is the section ID
+                 section_ids.add(section_id)
+            else:
+                # Handle cases where segment_id might be just the section_id (e.g., section strategy)
+                section_ids.add(seg_id)
+
+        if not section_ids:
+             logger.warning("Could not extract section IDs from provided segment IDs.")
+             return {}
+
+        # Query to get section details based on extracted section_ids
+        query = """
+        SELECT 
+            sec.id AS section_id,
+            sec.content AS section_content,
+            sec.title AS title,
+            sec.section_number,
+            l.id AS law_id,
+            l.abbreviation AS law_abbreviation,
+            l.full_name AS law_name
+        FROM 
+            sections sec
+        JOIN 
+            laws l ON sec.law_id = l.id
+        WHERE 
+            sec.id IN ({})
+        """.format(",".join([f"'{id}'" for id in section_ids]))
+        
+        try:
+            # Execute query and get column names
+            cursor = conn.execute(query)
+            columns = [desc[0] for desc in cursor.description]
+            result_tuples = cursor.fetchall()
             
-            query = """
-            SELECT 
-                s.id AS segment_id,
-                s.content AS content,
-                sections.content AS section_content,
-                sections.title AS title,
-                sections.section_number,
-                laws.id AS law_id,
-                laws.abbreviation AS law_abbreviation,
-                laws.full_name AS law_name
-            FROM 
-                segments s
-            JOIN 
-                sections ON s.section_id = sections.id
-            JOIN 
-                laws ON sections.law_id = laws.id
-            WHERE 
-                s.id IN ({})
+            # Convert tuples to dictionaries
+            section_details_list = [dict(zip(columns, row)) for row in result_tuples]
+
+            # Store section details mapped by section_id
+            section_details = {}
+            for row in section_details_list:
+                section_id = row["section_id"]
+                section_details[section_id] = {
+                    "section_content": row["section_content"],
+                    "title": row["title"],
+                    "section_number": row["section_number"],
+                    "law_id": row["law_id"],
+                    "law_abbreviation": row["law_abbreviation"],
+                    "law_name": row["law_name"]
+                }
+
+            # Now, retrieve the specific segment text from section_embeddings metadata
+            embeddings_query = """
+            SELECT segment_id, metadata 
+            FROM section_embeddings 
+            WHERE segment_id IN ({})
             """.format(",".join([f"'{id}'" for id in segment_ids]))
+
+            # Fetch embeddings metadata as dictionaries
+            emb_cursor = conn.execute(embeddings_query)
+            emb_columns = [desc[0] for desc in emb_cursor.description]
+            emb_tuples = emb_cursor.fetchall()
+            embeddings_list = [dict(zip(emb_columns, row)) for row in emb_tuples]
             
-            try:
-                result = conn.execute(query).fetchall()
-                
-                for row in result:
-                    segment_id = row["segment_id"]
-                    segments_data[segment_id] = {
-                        "content": row["content"],
-                        "section_content": row["section_content"],
-                        "title": row["title"],
-                        "section_number": row["section_number"],
-                        "law_id": row["law_id"],
-                        "law_abbreviation": row["law_abbreviation"],
-                        "law_name": row["law_name"]
-                    }
-            except Exception as e:
-                logger.error(f"Error retrieving segment content: {e}", exc_info=True)
-                
-            return segments_data
+            segment_metadata = {}
+            for emb_row in embeddings_list:
+                 seg_id = emb_row["segment_id"]
+                 meta_json = emb_row["metadata"]
+                 if meta_json:
+                     try:
+                         segment_metadata[seg_id] = json.loads(meta_json)
+                     except json.JSONDecodeError:
+                         logger.warning(f"Could not decode metadata for segment {seg_id}")
+                         segment_metadata[seg_id] = {}
+                 else:
+                    segment_metadata[seg_id] = {}
+
+            # Combine section details with segment-specific info
+            for seg_id in segment_ids:
+                 # Derive section_id again
+                 parts = seg_id.split('_')
+                 derived_section_id = parts[0] # Needs robust parsing
+                 
+                 if derived_section_id in section_details and seg_id in segment_metadata:
+                     segment_meta = segment_metadata[seg_id]
+                     # Retrieve the original segment text - HOW IS IT STORED?
+                     # Option 1: Re-extract from section_content using start/end indices in metadata
+                     # Option 2: Store segment text directly in metadata (better)
+                     # Assuming Option 1 for now:
+                     section_content = section_details[derived_section_id]["section_content"]
+                     start_idx = segment_meta.get("start_idx", 0)
+                     end_idx = segment_meta.get("end_idx", len(section_content))
+                     segment_text_content = section_content[start_idx:end_idx]
+
+                     segments_data[seg_id] = {
+                        "content": segment_text_content, # Use the specific segment text
+                        "section_content": section_details[derived_section_id]["section_content"], # Full section content
+                        "title": section_details[derived_section_id]["title"],
+                        "section_number": section_details[derived_section_id]["section_number"],
+                        "law_id": section_details[derived_section_id]["law_id"],
+                        "law_abbreviation": section_details[derived_section_id]["law_abbreviation"],
+                        "law_name": section_details[derived_section_id]["law_name"],
+                        "metadata": segment_meta # Add segment metadata
+                     }
+                 else:
+                    logger.warning(f"Could not find full details for segment {seg_id}")
+
+        except Exception as e:
+            logger.error(f"Error retrieving segment content: {e}", exc_info=True)
+            
+        return segments_data
     
     def _highlight_text(self, text: str, query: str) -> str:
         """
@@ -381,7 +460,7 @@ class SearchService:
                 
         return highlighted
     
-    def _estimate_total_results(self, query: str, filters: Dict[str, Any]) -> int:
+    def _estimate_total_results(self, query: str, filters: dict[str, Any]) -> int:
         """
         Estimate the total number of results for a query.
         
@@ -412,7 +491,7 @@ class SearchService:
     def _get_cache_key(
         self, 
         query: str, 
-        filters: Optional[Dict[str, Any]], 
+        filters: dict[str, Any] | None, 
         page: int, 
         limit: int
     ) -> str:

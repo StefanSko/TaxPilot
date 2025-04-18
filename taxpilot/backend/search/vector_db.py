@@ -13,7 +13,7 @@ import logging
 import uuid
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import cast, Any, Dict, List, Optional, Union
+from typing import Any, cast
 from pathlib import Path
 
 import numpy as np
@@ -187,15 +187,20 @@ class VectorDatabase:
                 elif self.config.distance_metric.lower() == "euclidean":
                     distance = Distance.EUCLID
                 
-                self.client.create_collection(
-                    collection_name=self.config.collection_name,
-                    vectors_config=VectorParams(
+                create_params = {
+                    "collection_name": self.config.collection_name,
+                    "vectors_config": VectorParams(
                         size=self.config.embedding_dim,
                         distance=distance
                     ),
-                    on_disk_payload=True,  # Store payload on disk for large collections
-                    metadata_schema=self.config.metadata_schema
-                )
+                    "on_disk_payload": True,  # Store payload on disk for large collections
+                }
+                
+                # Add metadata_schema only if not in local mode
+                if self.config.local_path is None:
+                    create_params["metadata_schema"] = self.config.metadata_schema
+                    
+                self.client.create_collection(**create_params)
                 
                 # Create index for efficient filtering
                 self._create_indexes()
@@ -367,7 +372,7 @@ class VectorDatabase:
                 SELECT id FROM section_embeddings
                 WHERE segment_id = ? AND embedding_model = ? AND embedding_version = ?
                 """,
-                (embedding.segment_id, embedding.embedding_model, embedding.embedding_version)
+                (embedding.segment_id, embedding.embedding_model, embedding.embedding_version),
             ).fetchone()
             
             if result:
@@ -386,8 +391,6 @@ class VectorDatabase:
                 )
         except Exception as e:
             logger.error(f"Error updating DuckDB reference: {str(e)}")
-        finally:
-            conn.close()
     
     def search(self, params: SearchParameters) -> list[SearchResult]:
         """
@@ -439,16 +442,22 @@ class VectorDatabase:
             if conditions:
                 filter_dict = Filter(must=conditions)
             
+            # Construct search parameters based on whether we're in local mode
+            search_kwargs = {
+                "collection_name": self.config.collection_name,
+                "query_vector": params.query_vector.tolist() if params.query_vector is not None else None,
+                "limit": params.top_k,
+                "with_payload": params.include_metadata,
+                "score_threshold": params.min_score,
+                "offset": params.offset,
+            }
+            
+            # Only add filter if we're not in local mode
+            if filter_dict is not None and self.config.local_path is None:
+                search_kwargs["filter"] = filter_dict
+            
             # Perform the search
-            search_result = self.client.search(
-                collection_name=self.config.collection_name,
-                query_vector=params.query_vector.tolist() if params.query_vector is not None else None,
-                limit=params.top_k,
-                with_payload=params.include_metadata,
-                score_threshold=params.min_score,
-                offset=params.offset,
-                filter=filter_dict
-            )
+            search_result = self.client.search(**search_kwargs)
             
             # Convert to our result format
             results = []
@@ -811,8 +820,6 @@ class VectorDatabase:
         except Exception as e:
             logger.error(f"Error during synchronization: {str(e)}")
             return {"error": str(e)}
-        finally:
-            conn.close()
     
     def close(self) -> None:
         """Close the vector database connection."""

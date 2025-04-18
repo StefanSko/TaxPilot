@@ -2,6 +2,34 @@
 
 The search component handles text processing, segmentation, and vector embedding for legal texts to enable semantic search functionality.
 
+## Setup
+
+By default, the search pipeline expects a Qdrant vector database server running and accessible at `http://localhost:6333` (configurable via the `QDRANT_URL` environment variable).
+
+The easiest way to run Qdrant is using Docker:
+```bash
+docker run -p 6333:6333 -p 6334:6334 \
+    -v $(pwd)/qdrant_storage:/qdrant/storage:z \
+    qdrant/qdrant
+```
+
+### Local Storage Mode
+
+Alternatively, you can configure the pipeline to use local on-disk storage for Qdrant, eliminating the need for a separate server. This is useful for development or simpler deployments.
+
+To enable local mode, provide a path when configuring the `IndexingConfig`:
+
+```python
+from pathlib import Path
+from taxpilot.backend.search.indexing_pipeline import IndexingConfig
+
+config = IndexingConfig(
+    # ... other settings
+    qdrant_local_path=Path("./my_qdrant_data") # Set this path
+)
+```
+The pipeline will then create and manage Qdrant data files within the specified directory (`./my_qdrant_data` in this example).
+
 ## Modules
 
 ### 1. Segmentation
@@ -64,7 +92,7 @@ The embeddings module provides functionality to generate vector embeddings for l
 
 The module supports several embedding models optimized for German legal text:
 
-- **German BERT** (`deepset/gbert-base`): General-purpose German language model
+- **German BERT** (`deepset/gbert-base`): General-purpose German language model (Default)
 - **German BERT Large** (`deepset/gbert-large`): Larger model with more parameters
 - **Multilingual E5** (`intfloat/multilingual-e5-large`): Multilingual model with strong retrieval performance
 - **Legal BERT** (`nlpaueb/legal-bert-base-uncased`): English legal domain model (transferable to German)
@@ -102,6 +130,94 @@ embedding_ids = processor.process_segments(segments)
 print(f"Generated and stored {len(embedding_ids)} embeddings")
 ```
 
+## End-to-End Search Pipeline
+
+The `indexing_pipeline.py` module provides an end-to-end solution for indexing laws and searching them.
+
+### Indexing Laws
+
+To index all laws in the database:
+
+```bash
+# Index all laws in the database (assumes Qdrant server running)
+python -m taxpilot.backend.search.indexing_pipeline --db-path=data/processed/taxpilot.duckdb
+
+# Index with specific configuration (e.g., using local Qdrant)
+python -m taxpilot.backend.search.indexing_pipeline \
+    --db-path=data/processed/taxpilot.duckdb \
+    --segmentation-strategy=paragraph \
+    --embedding-model=deepset/gbert-base \
+    --use-gpu \
+    --qdrant-local-path=./qdrant_data # Add this for local mode
+
+# Index only specific laws
+python -m taxpilot.backend.search.indexing_pipeline \
+    --db-path=data/processed/taxpilot.duckdb \
+    --laws estg ustg_1980
+```
+
+### Searching Laws with CLI
+
+The `search_cli.py` module provides a command-line interface for searching indexed laws:
+
+```bash
+# Basic search (assumes Qdrant server running or uses local path if indexed with one)
+python -m taxpilot.backend.search.search_cli "Einkommensteuer"
+
+# Search in a specific law
+python -m taxpilot.backend.search.search_cli "Steuerpflicht" --law estg
+
+# Get more results
+python -m taxpilot.backend.search.search_cli "Umsatzsteuer" --limit 10
+
+# Output as JSON for further processing
+python -m taxpilot.backend.search.search_cli "Steuerabzug" --json
+
+# Disable highlighting
+python -m taxpilot.backend.search.search_cli "Abgabenordnung" --no-highlights
+```
+
+### Using the Search API in Code
+
+```python
+from pathlib import Path
+from taxpilot.backend.data_processing.database import DbConfig
+from taxpilot.backend.search.indexing_pipeline import create_search_api, IndexingConfig
+
+# Create search API configuration
+# Default: Connects to Qdrant server
+config = IndexingConfig(
+    db_config=DbConfig(db_path="data/processed/taxpilot.duckdb")
+)
+
+# Alternative: Use local Qdrant storage
+# config = IndexingConfig(
+#     db_config=DbConfig(db_path="data/processed/taxpilot.duckdb"),
+#     qdrant_local_path=Path("./qdrant_data") # Use the same path as during indexing
+# )
+
+search_api = create_search_api(config)
+
+# Perform search
+try:
+    results = search_api.search(
+        query="Steuererklärung",
+        filters={"law_id": "estg"},  # Optional filter
+        limit=5,
+        highlight=True
+    )
+    
+    # Process results
+    for result in results.results:
+        print(f"Section: {result.section_number}")
+        print(f"Title: {result.title}")
+        print(f"Score: {result.relevance_score}")
+        print(f"Content: {result.content[:200]}...")
+        print()
+finally:
+    search_api.close()
+```
+
 ## Modal.com Integration
 
 TaxPilot uses Modal.com for serverless deployment of embedding generation:
@@ -132,7 +248,7 @@ with modal.run():
 
 ### Embedding Generation
 
-1. **German Language Models**: The project uses German-specific embedding models like deepset/gbert-base that understand the nuances of German language, which is essential for legal text.
+1. **German Language Models**: The project uses German-specific embedding models like `deepset/gbert-base` that understand the nuances of German language, which is essential for legal text.
 
 2. **GPU Acceleration**: The Modal.com configuration requests GPU acceleration when available, significantly speeding up embedding generation for large corpora.
 
@@ -144,10 +260,10 @@ with modal.run():
 
 The default embedding model (`deepset/gbert-base`) was chosen for several reasons:
 
-1. **Native German Understanding**: It was trained specifically on German text, understanding German grammar, compound words, and linguistic structures
-2. **Legal Terminology Support**: The training corpus included German Wikipedia and news, which contain significant legal terminology
-3. **Balance of Quality and Performance**: The base version provides good embeddings while being computationally efficient
-4. **Semantic Similarity Capability**: It effectively captures semantic relationships between legal concepts and terms
-5. **Common in German NLP**: Well-tested for German language tasks with established performance metrics
+1. **Native German Understanding**: It was trained specifically on German text, understanding German grammar, compound words, and linguistic structures.
+2. **Legal Terminology Support**: The training corpus included German Wikipedia and news, which contain significant legal terminology.
+3. **Balance of Quality and Performance**: The base version provides good embeddings while being computationally efficient.
+4. **Semantic Similarity Capability**: It effectively captures semantic relationships between legal concepts and terms.
+5. **Common in German NLP**: Well-tested for German language tasks with established performance metrics.
 
 For premium performance, the larger model (`deepset/gbert-large`) can be used, which provides better semantic understanding at the cost of more computation time.
