@@ -14,6 +14,7 @@ from enum import Enum
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable, Any, Dict, List, Optional, Tuple, Union, cast
+import uuid
 
 import torch
 import numpy as np
@@ -462,52 +463,48 @@ class EmbeddingProcessor:
         self._initialize_db()
     
     def _initialize_db(self):
-        """Initialize database tables for storing embeddings."""
+        """Initialize database tables for storing embeddings if they don't exist."""
         conn = get_connection(self.config.db_config)
         
         try:
-            # Drop the table first to ensure schema update
-            logger.info("Dropping existing section_embeddings table (if exists)...")
-            conn.execute("DROP TABLE IF EXISTS section_embeddings")
+            # logger.info("Dropping existing section_embeddings table (if exists)...")
+            # conn.execute("DROP TABLE IF EXISTS section_embeddings") # Do not drop if we want to reuse
             
-            # Create section_embeddings table if it doesn't exist
-            conn.execute(
-                """
-                CREATE TABLE section_embeddings (
-                    id VARCHAR PRIMARY KEY,
-                    law_id VARCHAR,           -- Ensure this column exists
-                    section_id VARCHAR,
-                    segment_id VARCHAR,
-                    embedding_model VARCHAR,
-                    embedding_version VARCHAR,
-                    embedding BLOB,
-                    vector_db_id VARCHAR,     -- Added column for vector DB reference
-                    metadata JSON,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
+            # Create section_embeddings table IF NOT EXISTS
+            create_table_sql = f"""
+            CREATE TABLE IF NOT EXISTS section_embeddings (
+                id VARCHAR PRIMARY KEY,
+                law_id VARCHAR,
+                section_id VARCHAR,
+                segment_id VARCHAR,
+                embedding_model VARCHAR,
+                embedding_version VARCHAR,
+                embedding FLOAT[{self.config.embedding_dim}],  -- Use native FLOAT array
+                vector_db_id VARCHAR, 
+                metadata JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            logger.info("Created new section_embeddings table.")
+            """
+            conn.execute(create_table_sql)
+            logger.info(f"Ensured section_embeddings table exists with embedding dimension {self.config.embedding_dim}.")
             
-            # Create indexes for efficient retrieval *after* the table exists
+            # Create indexes IF NOT EXISTS
             conn.execute(
-                "CREATE INDEX idx_section_embeddings_law_id ON section_embeddings(law_id)"
+                "CREATE INDEX IF NOT EXISTS idx_section_embeddings_law_id ON section_embeddings(law_id)"
             )
             conn.execute(
-                "CREATE INDEX idx_section_embeddings_section_id ON section_embeddings(section_id)"
+                "CREATE INDEX IF NOT EXISTS idx_section_embeddings_section_id ON section_embeddings(section_id)"
             )
             conn.execute(
-                "CREATE INDEX idx_section_embeddings_segment_id ON section_embeddings(segment_id)"
+                "CREATE INDEX IF NOT EXISTS idx_section_embeddings_segment_id ON section_embeddings(segment_id)"
             )
             conn.execute(
-                "CREATE INDEX idx_section_embeddings_model_version ON section_embeddings(embedding_model, embedding_version)"
+                "CREATE INDEX IF NOT EXISTS idx_section_embeddings_model_version ON section_embeddings(embedding_model, embedding_version)"
             )
 
-            logger.info("Embedding database tables and indexes initialized")
+            logger.info("Embedding database tables and indexes initialized/verified")
         except Exception as e:
             logger.error(f"Error initializing embedding database: {e}")
-            # Close connection only if an error occurred during initialization
-            conn.close()
             raise
 
     def process_segments(self, segments: list[TextSegment]) -> list[str]:
@@ -549,56 +546,34 @@ class EmbeddingProcessor:
         
         try:
             for embedding in embeddings:
-                # Generate a unique ID for the embedding
-                embedding_id = f"{embedding.law_id}_{embedding.segment_id}_{hashlib.md5(embedding.vector.tobytes()).hexdigest()[:8]}"
+                # Use a generated UUID as the primary key for uniqueness
+                embedding_id = str(uuid.uuid4())
                 
-                # Serialize the embedding vector
-                vector_bytes = embedding.vector.tobytes()
+                # Convert NumPy vector to list for storage
+                vector_list = embedding.vector.tolist()
                 
-                # Check if there's an existing record for this segment
-                existing = conn.execute(
+                # No need to check for existing records when using UUIDs
+                # Always insert new embedding with unique ID
+                conn.execute(
                     """
-                    SELECT id FROM section_embeddings
-                    WHERE segment_id = ? AND embedding_model = ? AND embedding_version = ?
+                    INSERT INTO section_embeddings (
+                        id, law_id, section_id, segment_id, 
+                        embedding_model, embedding_version, 
+                        embedding, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (embedding.segment_id, embedding.embedding_model, embedding.embedding_version),
-                ).fetchone()
-                
-                if existing:
-                    # Update the existing record
-                    conn.execute(
-                        """
-                        UPDATE section_embeddings SET
-                        embedding = ?,
-                        metadata = ?,
-                        created_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
-                        """,
-                        (vector_bytes, json.dumps(embedding.metadata), existing[0]),
-                    )
-                    embedding_ids.append(existing[0])
-                else:
-                    # Insert new embedding
-                    conn.execute(
-                        """
-                        INSERT INTO section_embeddings (
-                            id, law_id, section_id, segment_id, 
-                            embedding_model, embedding_version, 
-                            embedding, metadata
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            embedding_id,
-                            embedding.law_id,
-                            embedding.section_id,
-                            embedding.segment_id,
-                            embedding.embedding_model,
-                            embedding.embedding_version,
-                            vector_bytes,
-                            json.dumps(embedding.metadata),
-                        ),
-                    )
-                    embedding_ids.append(embedding_id)
+                    (
+                        embedding_id, # Use generated UUID
+                        embedding.law_id,
+                        embedding.section_id,
+                        embedding.segment_id, # Store original segment ID
+                        embedding.embedding_model,
+                        embedding.embedding_version,
+                        vector_list, # Insert the list directly
+                        json.dumps(embedding.metadata),
+                    ),
+                )
+                embedding_ids.append(embedding_id)
             
             logger.info(f"Stored {len(embeddings)} embeddings in database")
             return embedding_ids
@@ -635,8 +610,8 @@ class EmbeddingProcessor:
             if not result:
                 return None
             
-            # Deserialize the embedding vector
-            vector = np.frombuffer(result[6], dtype=np.float32)
+            # Deserialize the embedding vector from list
+            vector = np.array(result[6], dtype=np.float32)
             
             # Create and return the embedding object
             return TextEmbedding(
@@ -679,8 +654,8 @@ class EmbeddingProcessor:
             
             embeddings = []
             for result in results:
-                # Deserialize the embedding vector
-                vector = np.frombuffer(result[6], dtype=np.float32)
+                # Deserialize the embedding vector from list
+                vector = np.array(result[6], dtype=np.float32)
                 
                 # Create the embedding object
                 embedding = TextEmbedding(

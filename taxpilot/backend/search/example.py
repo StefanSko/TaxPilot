@@ -9,7 +9,9 @@ This script provides an end-to-end example of:
 
 import logging
 import time
+import argparse
 from pathlib import Path
+import copy
 
 from taxpilot.backend.data_processing.database import DbConfig, get_all_laws
 from taxpilot.backend.search.segmentation import SegmentationStrategy
@@ -24,7 +26,7 @@ logging.basicConfig(
 )
 
 
-def run_example():
+def run_example(search_only: bool = False, debug: bool = False):
     """Run the complete search workflow example."""
     print("\n" + "="*80)
     print(" TaxPilot Search Example ".center(80, "="))
@@ -68,16 +70,34 @@ def run_example():
     pipeline = SearchPipeline(config)
     
     try:
-        # Step 1: Index the laws
-        print("\nStep 1: Indexing laws...")
-        start_time = time.time()
-        stats = pipeline.index_all_laws()
-        indexing_time = time.time() - start_time
-        
-        print(f"Indexing completed in {indexing_time:.2f} seconds")
-        print(f"Processed {stats['laws_processed']} laws")
-        print(f"Created {stats['segments_created']} segments")
-        print(f"Generated {stats['embeddings_generated']} embeddings")
+        # Step 1: Index the laws (conditionally)
+        if not search_only:
+            print("\nStep 1: Indexing laws from source (will clear Qdrant first)...")
+            start_time = time.time()
+            stats = pipeline.index_all_laws() # This now deletes Qdrant collection first
+            indexing_time = time.time() - start_time
+            
+            print(f"Indexing completed in {indexing_time:.2f} seconds")
+            if "error_message" in stats:
+                print(f"ERROR during indexing: {stats['error_message']}")
+                return # Stop if indexing failed
+            print(f"Processed {stats['laws_processed']} laws")
+            print(f"Created {stats['segments_created']} segments")
+            print(f"Generated {stats['embeddings_generated']} embeddings")
+        else:
+            print("\nStep 1: Synchronizing Qdrant index from existing DuckDB data (will clear Qdrant first)...")
+            start_time = time.time()
+            stats = pipeline.sync_qdrant_from_duckdb()
+            sync_time = time.time() - start_time
+            
+            print(f"Synchronization completed in {sync_time:.2f} seconds")
+            if "error" in stats:
+                print(f"ERROR during sync: {stats['error']}")
+                return # Stop if sync failed
+            print(f"Checked {stats['embeddings_checked_in_duckdb']} embeddings in DuckDB")
+            print(f"{stats['embeddings_inserted_or_updated_in_qdrant']} embeddings added to Qdrant")
+            print(f"{stats['duckdb_ids_updated']} DuckDB rows updated with new vector_db_id")
+            print(f"{stats['errors']} errors occurred during sync.")
         
         # Step 2: Run some example searches
         print("\nStep 2: Running example searches...")
@@ -108,20 +128,31 @@ def run_example():
             # Display the results
             for j, result in enumerate(results.results, 1):
                 print(f"\nResult {j}:")
-                print(f"Section: {result.section_number}")
-                print(f"Title: {result.title}")
-                print(f"Score: {result.relevance_score:.4f}")
-                
-                # Show a snippet of the content with highlights
-                content = result.content_with_highlights
-                # Replace HTML highlight tags with terminal color codes
-                content = content.replace('<mark>', '\033[1;33m')
-                content = content.replace('</mark>', '\033[0m')
-                
-                # Show a snippet of reasonable length
-                max_length = 300
-                snippet = content[:max_length] + "..." if len(content) > max_length else content
-                print(f"Snippet: {snippet}")
+                if debug:
+                    # Print the full object representation in debug mode, but truncate long content
+                    debug_result = copy.deepcopy(result)
+                    max_len = 100 # Max length for content fields in debug repr
+                    if len(debug_result.content) > max_len:
+                        debug_result.content = debug_result.content[:max_len] + "..."
+                    if len(debug_result.content_with_highlights) > max_len:
+                         debug_result.content_with_highlights = debug_result.content_with_highlights[:max_len] + "..."
+                    print(repr(debug_result)) # Print the repr of the modified copy
+                else:
+                    # Print formatted output in normal mode
+                    print(f"Law: {result.law_abbreviation} | Section: {result.section_number}")
+                    print(f"Title: {result.title}")
+                    print(f"Score: {result.relevance_score:.4f}")
+                    
+                    # Show a snippet of the content with highlights
+                    content = result.content_with_highlights
+                    # Replace HTML highlight tags with terminal color codes
+                    content = content.replace('<mark>', '\033[1;33m')
+                    content = content.replace('</mark>', '\033[0m')
+                    
+                    # Show a snippet of reasonable length
+                    max_length = 300
+                    snippet = content[:max_length] + "..." if len(content) > max_length else content
+                    print(f"Snippet: {snippet}")
         
         # Step 3: Get vector database statistics
         print("\nStep 3: Vector database statistics...")
@@ -146,8 +177,22 @@ def run_example():
 
 
 if __name__ == "__main__":
+    # Add argument parser
+    parser = argparse.ArgumentParser(description="Run TaxPilot Search Example")
+    parser.add_argument(
+        "--search-only",
+        action="store_true",
+        help="Skip the indexing step and only run searches on existing data."
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print full QueryResult objects instead of formatted snippets."
+    )
+    args = parser.parse_args()
+
     try:
-        run_example()
+        run_example(search_only=args.search_only, debug=args.debug)
     except KeyboardInterrupt:
         print("\nExample interrupted.")
     except Exception as e:

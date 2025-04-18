@@ -267,8 +267,8 @@ class VectorDatabase:
             )
             logger.debug(f"Stored embedding with ID {point_id}")
             
-            # Update the DuckDB record with the vector database reference
-            self._update_duckdb_reference(embedding, point_id)
+            # No longer need to update DuckDB reference here, it's handled during embedding storage
+            # self._update_duckdb_reference(embedding, point_id)
             
             return point_id
         except Exception as e:
@@ -333,8 +333,9 @@ class VectorDatabase:
                 logger.info(f"Stored batch of {len(batch)} embeddings")
                 
                 # Update DuckDB references for this batch
-                for j, point_id in enumerate(batch_ids):
-                    self._update_duckdb_reference(embeddings[i + j], point_id)
+                # This update is also redundant now
+                # for j, point_id in enumerate(batch_ids):
+                #     self._update_duckdb_reference(embeddings[i + j], point_id)
                 
             except Exception as e:
                 logger.error(f"Error storing batch {i//batch_size}: {str(e)}")
@@ -345,52 +346,13 @@ class VectorDatabase:
                             collection_name=self.config.collection_name,
                             points=[point]
                         )
-                        self._update_duckdb_reference(embeddings[i + j], batch_ids[j])
+                        # No need to update reference here either
+                        # self._update_duckdb_reference(embeddings[i + j], batch_ids[j])
                     except Exception as inner_e:
                         logger.error(f"Error storing individual point: {str(inner_e)}")
                         point_ids[i + j] = ""  # Mark as failed
         
         return [pid for pid in point_ids if pid]
-    
-    def _update_duckdb_reference(self, embedding: TextEmbedding, vector_db_id: str) -> None:
-        """
-        Update the DuckDB record with the vector database reference.
-        
-        Args:
-            embedding: The embedding that was stored
-            vector_db_id: The ID assigned in the vector database
-        """
-        if not self.config.db_config:
-            return
-        
-        conn = get_connection(self.config.db_config)
-        
-        try:
-            # Check if there's an existing record for this segment
-            result = conn.execute(
-                """
-                SELECT id FROM section_embeddings
-                WHERE segment_id = ? AND embedding_model = ? AND embedding_version = ?
-                """,
-                (embedding.segment_id, embedding.embedding_model, embedding.embedding_version),
-            ).fetchone()
-            
-            if result:
-                # Update the existing record
-                conn.execute(
-                    """
-                    UPDATE section_embeddings
-                    SET vector_db_id = ?
-                    WHERE id = ?
-                    """,
-                    (vector_db_id, result[0])
-                )
-            else:
-                logger.warning(
-                    f"No embedding record found in DuckDB for segment {embedding.segment_id}"
-                )
-        except Exception as e:
-            logger.error(f"Error updating DuckDB reference: {str(e)}")
     
     def search(self, params: SearchParameters) -> list[SearchResult]:
         """
@@ -657,6 +619,29 @@ class VectorDatabase:
             logger.error(f"Error getting collection stats: {str(e)}")
             return {"error": str(e)}
     
+    def delete_collection(self) -> bool:
+        """Delete the entire vector collection."""
+        try:
+            logger.warning(f"Deleting Qdrant collection: {self.config.collection_name}")
+            self.client.delete_collection(collection_name=self.config.collection_name)
+            logger.info(f"Collection {self.config.collection_name} deleted successfully.")
+            # Re-initialize to ensure it's recreated cleanly on next use if needed
+            self._initialize_collection()
+            return True
+        except UnexpectedResponse as e:
+            # Qdrant might return 404 if collection doesn't exist, which is fine
+            if e.status_code == 404:
+                logger.info(f"Collection {self.config.collection_name} did not exist, nothing to delete.")
+                # Still ensure it's initialized for subsequent operations
+                self._initialize_collection()
+                return True
+            else:
+                logger.error(f"Error deleting collection {self.config.collection_name}: {str(e)} ({e.status_code})")
+                return False
+        except Exception as e:
+            logger.error(f"Error deleting collection {self.config.collection_name}: {str(e)}")
+            return False
+    
     def optimize_collection(self) -> bool:
         """
         Optimize the vector collection for search performance.
@@ -741,85 +726,146 @@ class VectorDatabase:
             logger.error(f"Error restoring collection: {str(e)}")
             return False
     
-    def sync_with_duckdb(self) -> dict[str, Any]:
+    def sync_with_duckdb(self, force_repopulate: bool = False) -> dict[str, Any]:
         """
         Synchronize the vector database with DuckDB.
+ 
+        Ensures that embeddings in DuckDB are represented in Qdrant.
         
-        This ensures that all embeddings in DuckDB are also in
-        the vector database with correct references.
+        Args:
+            force_repopulate: If True, ignore existing vector_db_ids in DuckDB 
+                              and re-insert all embeddings into Qdrant, updating 
+                              the vector_db_id in DuckDB afterwards. 
+                              If False (default), only insert embeddings from 
+                              DuckDB that have a null vector_db_id.
         
         Returns:
             Statistics about the synchronization
         """
         if not self.config.db_config:
+            logger.error("Cannot sync: No DuckDB configuration provided")
             return {"error": "No DuckDB configuration provided"}
         
         conn = get_connection(self.config.db_config)
         stats = {
-            "embeddings_checked": 0,
-            "embeddings_added": 0,
-            "embeddings_already_synced": 0,
+            "embeddings_checked_in_duckdb": 0,
+            "embeddings_to_process": 0,
+            "embeddings_inserted_or_updated_in_qdrant": 0,
+            "duckdb_ids_updated": 0,
             "errors": 0
         }
+        points_to_insert: list[PointStruct] = []
+        duckdb_qdrant_id_map: dict[str, str] = {} # {duckdb_id: new_qdrant_id}
         
         try:
             # Get all embeddings from DuckDB
-            embeddings = conn.execute(
+            # Make sure to fetch the primary key 'id' from section_embeddings
+            cursor = conn.execute(
                 """
                 SELECT id, law_id, section_id, segment_id, 
                        embedding_model, embedding_version, 
                        embedding, metadata, vector_db_id
                 FROM section_embeddings
                 """
-            ).fetchall()
+            )
+            columns = [desc[0] for desc in cursor.description]
+            embeddings_in_duckdb = [dict(zip(columns, row)) for row in cursor.fetchall()]
             
-            stats["embeddings_checked"] = len(embeddings)
+            stats["embeddings_checked_in_duckdb"] = len(embeddings_in_duckdb)
+            logger.info(f"Found {stats['embeddings_checked_in_duckdb']} embeddings in DuckDB.")
+            if force_repopulate:
+                logger.info("Force repopulate enabled: All embeddings will be re-inserted into Qdrant.")
             
-            # Process each embedding
-            for emb in embeddings:
+            # Process each embedding from DuckDB
+            for emb_data in embeddings_in_duckdb:
                 try:
-                    emb_id, law_id, section_id, segment_id, model, version, embedding_bytes, metadata_str, vector_db_id = emb
+                    duckdb_id = emb_data["id"]
+                    vector_db_id_exists = emb_data.get("vector_db_id") is not None
                     
-                    # Skip if already has a vector_db_id
-                    if vector_db_id:
-                        stats["embeddings_already_synced"] += 1
+                    # Skip if not forcing repopulation and ID already exists
+                    if not force_repopulate and vector_db_id_exists:
                         continue
                     
-                    # Create TextEmbedding object
-                    vector = np.frombuffer(embedding_bytes, dtype=np.float32)
-                    metadata = json.loads(metadata_str) if metadata_str else {}
+                    stats["embeddings_to_process"] += 1
                     
-                    text_embedding = TextEmbedding(
-                        vector=vector,
-                        segment_id=segment_id,
-                        law_id=law_id,
-                        section_id=section_id,
-                        metadata=metadata,
-                        embedding_model=model,
-                        embedding_version=version
+                    # Generate a new Qdrant Point ID
+                    new_qdrant_point_id = str(uuid.uuid4())
+                    
+                    # Prepare metadata payload for Qdrant
+                    metadata_payload = {
+                        "law_id": emb_data["law_id"],
+                        "section_id": emb_data["section_id"],
+                        "segment_id": emb_data["segment_id"],
+                        "embedding_model": emb_data["embedding_model"],
+                        "embedding_version": emb_data["embedding_version"],
+                        "date_created": time.time(),
+                        **(json.loads(emb_data["metadata"]) if emb_data["metadata"] else {})
+                    }
+                    
+                    # Create the PointStruct
+                    vector_list = emb_data["embedding"] # Already a list from DuckDB array
+                    point = PointStruct(
+                        id=new_qdrant_point_id,
+                        vector=vector_list,
+                        payload=metadata_payload
                     )
+                    points_to_insert.append(point)
                     
-                    # Store in vector database
-                    new_vector_id = self.store_embedding(text_embedding)
-                    stats["embeddings_added"] += 1
-                    
-                    # Ensure reference is updated (normally done in store_embedding)
-                    conn.execute(
-                        """
-                        UPDATE section_embeddings
-                        SET vector_db_id = ?
-                        WHERE id = ?
-                        """,
-                        (new_vector_id, emb_id)
-                    )
+                    # Store mapping to update DuckDB later
+                    duckdb_qdrant_id_map[duckdb_id] = new_qdrant_point_id
+                        
                 except Exception as e:
-                    logger.error(f"Error processing embedding {emb[0]}: {str(e)}")
+                    logger.error(f"Error preparing embedding {emb_data.get('id', 'unknown')} for sync: {str(e)}")
                     stats["errors"] += 1
             
+            # Insert points into Qdrant in batches
+            logger.info(f"Processed {stats['embeddings_to_process']} embeddings for Qdrant insertion.")
+            if points_to_insert:
+                batch_size = self.config.batch_size
+                total_inserted = 0
+                for i in range(0, len(points_to_insert), batch_size):
+                    batch = points_to_insert[i:i + batch_size]
+                    try:
+                        self.client.upsert(
+                            collection_name=self.config.collection_name,
+                            points=batch,
+                            wait=True # Wait for operation to complete for accuracy
+                        )
+                        total_inserted += len(batch)
+                        logger.debug(f"Inserted batch of {len(batch)} points into Qdrant.")
+                    except Exception as e:
+                        logger.error(f"Error inserting batch into Qdrant: {str(e)}")
+                        stats["errors"] += 1 # Count batch insertion error
+                        # Optionally, could try individual inserts here as fallback
+                
+                stats["embeddings_inserted_or_updated_in_qdrant"] = total_inserted
+                logger.info(f"Successfully inserted/updated {total_inserted} points in Qdrant.")
+
+                # Update DuckDB with the new Qdrant IDs if forcing repopulation or if initial IDs were null
+                if duckdb_qdrant_id_map: # Only update if there are mappings
+                    logger.info(f"Updating {len(duckdb_qdrant_id_map)} vector_db_id references in DuckDB...")
+                    updated_rows = 0
+                    with conn.cursor() as cur:
+                        for duckdb_id, new_qdrant_id in duckdb_qdrant_id_map.items():
+                            try:
+                                cur.execute(
+                                    "UPDATE section_embeddings SET vector_db_id = ? WHERE id = ?",
+                                    (new_qdrant_id, duckdb_id)
+                                )
+                                updated_rows += cur.rowcount
+                            except Exception as e:
+                                logger.error(f"Error updating vector_db_id for DuckDB id {duckdb_id}: {str(e)}")
+                                stats["errors"] += 1
+                    stats["duckdb_ids_updated"] = updated_rows
+                    logger.info(f"Updated {updated_rows} rows in DuckDB.")
+            else:
+                 logger.info("No new embeddings needed insertion into Qdrant.")
+
             return stats
         except Exception as e:
-            logger.error(f"Error during synchronization: {str(e)}")
-            return {"error": str(e)}
+            logger.error(f"General error during synchronization: {str(e)}", exc_info=True)
+            stats["errors"] += 1
+            return {"error": str(e), **stats}
     
     def close(self) -> None:
         """Close the vector database connection."""
@@ -902,14 +948,21 @@ class VectorDatabaseManager:
         """
         return self.db.optimize_collection()
     
-    def synchronize(self) -> dict[str, Any]:
+    def synchronize(self, force_repopulate: bool = False) -> dict[str, Any]:
         """
         Synchronize the vector database with DuckDB.
         
+        Args:
+            force_repopulate: If True, ignore existing vector_db_ids in DuckDB 
+                              and re-insert all embeddings into Qdrant, updating 
+                              the vector_db_id in DuckDB afterwards. 
+                              If False (default), only insert embeddings from 
+                              DuckDB that have a null vector_db_id.
+
         Returns:
             Statistics about the synchronization
         """
-        return self.db.sync_with_duckdb()
+        return self.db.sync_with_duckdb(force_repopulate=force_repopulate)
     
     def close(self) -> None:
         """Close the vector database connection."""

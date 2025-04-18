@@ -50,6 +50,7 @@ class QueryResult:
     """Represents a single search result with highlighting and metadata."""
     id: str
     law_id: str
+    law_abbreviation: str
     section_number: str
     title: str
     content: str
@@ -239,77 +240,93 @@ class SearchService:
         if not vector_results:
             return []
             
-        # Get segment IDs to retrieve from database
+        # Get segment IDs AND section IDs to retrieve from database
         segment_ids: list[str] = [result.segment_id for result in vector_results]
         
-        # Retrieve full content for all segments
-        segment_content = self._get_segments_content(segment_ids)
+        # Retrieve full content for all segments using the results directly
+        # This function now needs the full results to get the correct section_id
+        segment_details = self._get_segments_content(vector_results)
         
         # Process results
         enriched_results = []
         for result in vector_results:
-            if result.segment_id not in segment_content:
+            # --- REMOVED TEMPORARY DEBUG LOGGING --- 
+
+            # Use the details fetched by _get_segments_content
+            if result.segment_id not in segment_details:
+                logger.warning(f"Details not found in DB for segment {result.segment_id}. Skipping enrichment.")
                 continue
                 
-            content = segment_content[result.segment_id]["content"]
-            section_content = segment_content[result.segment_id].get("section_content", content)
+            details = segment_details[result.segment_id]
+            segment_text_content = details["segment_text_content"]
+            section_content = details["section_content"]
             
-            # Apply highlighting if requested
-            highlighted_content = self._highlight_text(section_content, query) if highlight else section_content
+            # Apply highlighting if requested - highlight the original segment text
+            highlighted_segment_text = self._highlight_text(segment_text_content, query) if highlight else segment_text_content
             
-            # Create enriched result
+            # Create enriched result using fetched details
             enriched_result = QueryResult(
                 id=result.segment_id,
-                law_id=result.metadata.get("law_id", ""),
-                section_number=result.metadata.get("section_number", ""),
-                title=result.metadata.get("title", ""),
-                content=section_content,
-                content_with_highlights=highlighted_content,
+                law_id=details.get("law_id", result.law_id), # Prefer fetched, fallback to payload
+                law_abbreviation=details.get("law_abbreviation", ""), # Populate abbreviation
+                section_number=details.get("section_number", ""),
+                title=details.get("title", ""),
+                content=segment_text_content, # Show the specific segment's text
+                content_with_highlights=highlighted_segment_text, # Show highlighted segment text
                 relevance_score=result.score,
-                metadata=result.metadata
+                metadata=result.metadata # Keep original metadata from Qdrant payload
             )
             
             enriched_results.append(enriched_result)
             
         return enriched_results
     
-    def _get_segments_content(self, segment_ids: list[str]) -> dict[str, dict[str, Any]]:
+    def _get_segments_content(self, search_results: list[SearchResult]) -> dict[str, dict[str, Any]]:
         """
         Retrieve full content and metadata for segments from database.
+        Uses the section_id from the search result payload for accurate lookup.
         
         Args:
-            segment_ids: List of segment IDs to retrieve (format: {section_id}_p{N} or similar)
+            search_results: List of SearchResult objects from Qdrant
             
         Returns:
             Dictionary mapping segment IDs to content and metadata
         """
-        if not segment_ids:
+        if not search_results:
             return {}
             
         conn = self.db_connection.get_connection()
         segments_data = {}
         
-        # Extract section_ids from segment_ids for efficient lookup
-        section_ids = set()
-        for seg_id in segment_ids:
-            # Assuming segment_id format like section_id_suffix
-            parts = seg_id.split('_')
-            if len(parts) > 1:
-                 # Reconstruct potential section_id (might need adjustment based on actual ID format)
-                 section_id = parts[0] 
-                 # Example: If section ID itself contains _, this needs a more robust parser
-                 # For now, assume the first part is the section ID
-                 section_ids.add(section_id)
+        # Extract section_ids directly from the payload for accurate lookup
+        # Also map segment_id to its corresponding section_id
+        section_ids_to_lookup = set()
+        segment_to_section_map = {}
+        for res in search_results:
+            # Use the section_id stored in the payload during indexing
+            payload_section_id = res.metadata.get("section_id") 
+            if payload_section_id:
+                section_ids_to_lookup.add(payload_section_id)
+                segment_to_section_map[res.segment_id] = payload_section_id
             else:
-                # Handle cases where segment_id might be just the section_id (e.g., section strategy)
-                section_ids.add(seg_id)
+                 # Fallback: Try parsing segment_id if section_id is missing in payload (shouldn't happen ideally)
+                 logger.warning(f"section_id missing in payload for segment {res.segment_id}. Attempting parse.")
+                 parts = res.segment_id.split('_')
+                 if len(parts) > 1:
+                     parsed_section_id = parts[0]
+                     section_ids_to_lookup.add(parsed_section_id)
+                     segment_to_section_map[res.segment_id] = parsed_section_id
+                 else:
+                     logger.error(f"Cannot determine section_id for segment {res.segment_id}. Cannot enrich.")
+                     continue # Cannot look up this segment
 
-        if not section_ids:
-             logger.warning("Could not extract section IDs from provided segment IDs.")
+        if not section_ids_to_lookup:
+             logger.warning("Could not extract any section IDs from search results.")
              return {}
 
         # Query to get section details based on extracted section_ids
-        query = """
+        placeholders = ",".join(["?" for _ in section_ids_to_lookup])
+        query = f"""
         SELECT 
             sec.id AS section_id,
             sec.content AS section_content,
@@ -323,89 +340,71 @@ class SearchService:
         JOIN 
             laws l ON sec.law_id = l.id
         WHERE 
-            sec.id IN ({})
-        """.format(",".join([f"'{id}'" for id in section_ids]))
+            sec.id IN ({placeholders})
+        """
         
         try:
-            # Execute query and get column names
-            cursor = conn.execute(query)
+            # Execute query using parameters
+            cursor = conn.execute(query, list(section_ids_to_lookup))
             columns = [desc[0] for desc in cursor.description]
             result_tuples = cursor.fetchall()
             
-            # Convert tuples to dictionaries
-            section_details_list = [dict(zip(columns, row)) for row in result_tuples]
+            # Convert tuples to dictionaries and map by section_id
+            # Find the index of the 'section_id' column
+            try:
+                section_id_index = columns.index('section_id')
+            except ValueError:
+                 logger.error("Could not find 'section_id' column in enrichment query results.")
+                 # Handle error: return empty or partially filled results
+                 return {seg_id: {"segment_text_content": "Error: DB column mapping failed."} for seg_id in segment_to_section_map.keys()}
 
-            # Store section details mapped by section_id
-            section_details = {}
-            for row in section_details_list:
-                section_id = row["section_id"]
-                section_details[section_id] = {
-                    "section_content": row["section_content"],
-                    "title": row["title"],
-                    "section_number": row["section_number"],
-                    "law_id": row["law_id"],
-                    "law_abbreviation": row["law_abbreviation"],
-                    "law_name": row["law_name"]
-                }
+            section_details = {row[section_id_index]: dict(zip(columns, row)) for row in result_tuples}
 
-            # Now, retrieve the specific segment text from section_embeddings metadata
-            embeddings_query = """
-            SELECT segment_id, metadata 
-            FROM section_embeddings 
-            WHERE segment_id IN ({})
-            """.format(",".join([f"'{id}'" for id in segment_ids]))
-
-            # Fetch embeddings metadata as dictionaries
-            emb_cursor = conn.execute(embeddings_query)
-            emb_columns = [desc[0] for desc in emb_cursor.description]
-            emb_tuples = emb_cursor.fetchall()
-            embeddings_list = [dict(zip(emb_columns, row)) for row in emb_tuples]
-            
-            segment_metadata = {}
-            for emb_row in embeddings_list:
-                 seg_id = emb_row["segment_id"]
-                 meta_json = emb_row["metadata"]
-                 if meta_json:
-                     try:
-                         segment_metadata[seg_id] = json.loads(meta_json)
-                     except json.JSONDecodeError:
-                         logger.warning(f"Could not decode metadata for segment {seg_id}")
-                         segment_metadata[seg_id] = {}
-                 else:
-                    segment_metadata[seg_id] = {}
-
-            # Combine section details with segment-specific info
-            for seg_id in segment_ids:
-                 # Derive section_id again
-                 parts = seg_id.split('_')
-                 derived_section_id = parts[0] # Needs robust parsing
+            # Combine section details with segment-specific info from Qdrant payload
+            for res in search_results:
+                 segment_id = res.segment_id
+                 lookup_section_id = segment_to_section_map.get(segment_id)
                  
-                 if derived_section_id in section_details and seg_id in segment_metadata:
-                     segment_meta = segment_metadata[seg_id]
-                     # Retrieve the original segment text - HOW IS IT STORED?
-                     # Option 1: Re-extract from section_content using start/end indices in metadata
-                     # Option 2: Store segment text directly in metadata (better)
-                     # Assuming Option 1 for now:
-                     section_content = section_details[derived_section_id]["section_content"]
+                 if lookup_section_id and lookup_section_id in section_details:
+                     sec_detail = section_details[lookup_section_id]
+                     segment_meta = res.metadata # Metadata from Qdrant payload
+                     
+                     # Extract segment text using start/end indices from Qdrant payload metadata
+                     section_content = sec_detail["section_content"]
                      start_idx = segment_meta.get("start_idx", 0)
                      end_idx = segment_meta.get("end_idx", len(section_content))
                      segment_text_content = section_content[start_idx:end_idx]
 
-                     segments_data[seg_id] = {
-                        "content": segment_text_content, # Use the specific segment text
-                        "section_content": section_details[derived_section_id]["section_content"], # Full section content
-                        "title": section_details[derived_section_id]["title"],
-                        "section_number": section_details[derived_section_id]["section_number"],
-                        "law_id": section_details[derived_section_id]["law_id"],
-                        "law_abbreviation": section_details[derived_section_id]["law_abbreviation"],
-                        "law_name": section_details[derived_section_id]["law_name"],
-                        "metadata": segment_meta # Add segment metadata
+                     segments_data[segment_id] = {
+                        "segment_text_content": segment_text_content, # Use the specific segment text
+                        "section_content": section_content,         # Full section content
+                        "title": sec_detail["title"],
+                        "section_number": sec_detail["section_number"],
+                        "law_id": sec_detail["law_id"],
+                        "law_abbreviation": sec_detail["law_abbreviation"],
+                        "law_name": sec_detail["law_name"],
+                        "original_qdrant_metadata": segment_meta # Keep original payload if needed
                      }
                  else:
-                    logger.warning(f"Could not find full details for segment {seg_id}")
+                    # Log if lookup failed for a segment
+                    if lookup_section_id:
+                         logger.warning(f"Section details not found in DB for section_id {lookup_section_id} (derived from segment {segment_id})")
+                    # else: handled above
+                    segments_data[segment_id] = { # Provide empty default
+                         "segment_text_content": "Error: Content lookup failed.",
+                         "section_content": "", "title": "", "section_number": "", "law_id": "",
+                         "law_abbreviation": "", "law_name": "", "original_qdrant_metadata": res.metadata
+                    }
 
         except Exception as e:
             logger.error(f"Error retrieving segment content: {e}", exc_info=True)
+            # Provide empty defaults for all requested segments on general error
+            for res in search_results:
+                 segments_data[res.segment_id] = {
+                      "segment_text_content": "Error: Content lookup failed.",
+                      "section_content": "", "title": "", "section_number": "", "law_id": "",
+                      "law_abbreviation": "", "law_name": "", "original_qdrant_metadata": res.metadata
+                 }
             
         return segments_data
     

@@ -140,7 +140,8 @@ class SearchPipeline:
     
     def index_all_laws(self) -> Dict[str, Any]:
         """
-        Index all laws in the database.
+        Index all laws in the database. This will delete the existing Qdrant 
+        collection and repopulate it from the source laws.
         
         Returns:
             Statistics about the indexing process
@@ -154,6 +155,15 @@ class SearchPipeline:
             "errors": 0,
             "total_time_seconds": 0
         }
+        
+        # --- Delete existing Qdrant collection first --- 
+        logger.info("Attempting to delete existing Qdrant collection before indexing...")
+        delete_success = self.vector_db.db.delete_collection()
+        if not delete_success:
+            logger.error("Failed to delete Qdrant collection. Aborting indexing.")
+            stats["error_message"] = "Failed to delete Qdrant collection"
+            return stats
+        # --- Collection deleted and reinitialized --- 
         
         # Get the list of laws to process
         laws = get_all_laws()
@@ -228,6 +238,11 @@ class SearchPipeline:
         logger.info("Optimizing vector database...")
         self.vector_db.optimize()
         
+        # Synchronize with vector database (incremental check after primary indexing)
+        logger.info("Performing final incremental sync check with vector database...")
+        sync_stats = self.vector_db.synchronize(force_repopulate=False) # Use False here
+        stats["final_sync_stats"] = sync_stats
+        
         logger.info(f"Indexing completed in {stats['total_time_seconds']:.2f} seconds")
         logger.info(f"Processed {stats['laws_processed']} laws, {stats['sections_processed']} sections")
         logger.info(f"Created {stats['segments_created']} segments, {stats['embeddings_generated']} embeddings")
@@ -270,12 +285,41 @@ class SearchPipeline:
             min_score=min_score
         )
     
-    def get_index_stats(self) -> Dict[str, Any]:
+    def sync_qdrant_from_duckdb(self) -> Dict[str, Any]:
         """
-        Get statistics about the indexed laws.
+        Deletes the existing Qdrant collection and repopulates it 
+        using only the embeddings currently stored in the DuckDB 
+        section_embeddings table.
         
         Returns:
-            Statistics about the indexed laws
+            Statistics about the synchronization process.
+        """
+        logger.info("Starting Qdrant synchronization from DuckDB...")
+        start_time = time.time()
+        
+        # 1. Delete existing Qdrant collection
+        logger.info("Attempting to delete existing Qdrant collection before sync...")
+        delete_success = self.vector_db.db.delete_collection()
+        if not delete_success:
+            logger.error("Failed to delete Qdrant collection. Aborting sync.")
+            return {"error": "Failed to delete Qdrant collection", "total_time_seconds": time.time() - start_time}
+        
+        # 2. Synchronize (repopulate) from DuckDB
+        logger.info("Synchronizing Qdrant collection from DuckDB embeddings...")
+        sync_stats = self.vector_db.synchronize(force_repopulate=True) # Force repopulation after delete
+        
+        end_time = time.time()
+        sync_stats["total_time_seconds"] = round(end_time - start_time, 2)
+        logger.info(f"Qdrant synchronization completed in {sync_stats['total_time_seconds']:.2f} seconds.")
+        
+        return sync_stats
+    
+    def get_index_stats(self) -> Dict[str, Any]:
+        """
+        Get statistics about the vector database index.
+        
+        Returns:
+            Statistics about the vector database index
         """
         stats = self.vector_db.get_stats()
         return stats
