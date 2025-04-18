@@ -36,9 +36,9 @@ logger = logging.getLogger("law_scraper")
 # Constants
 TAX_LAWS = {
     "estg": "Einkommensteuergesetz",
-    "kstg": "Körperschaftsteuergesetz",
-    "ustg": "Umsatzsteuergesetz",
-    "ao": "Abgabenordnung",
+    "kstg_1977": "Körperschaftsteuergesetz",
+    "ustg_1980": "Umsatzsteuergesetz",
+    "ao_1977": "Abgabenordnung",
     "gewstg": "Gewerbesteuergesetz",
 }
 
