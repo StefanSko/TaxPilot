@@ -21,6 +21,8 @@ numpy = "^2.2.4"
 pandas = "^2.2.3"
 sentence-transformers = "^3.4.1"
 qdrant-client = "^1.13.3"
+transformers = ">=4.48.0"
+torch = "^2.6.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
