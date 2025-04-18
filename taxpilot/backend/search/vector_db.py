@@ -37,6 +37,12 @@ from taxpilot.backend.search.embeddings import TextEmbedding, EmbeddingModelType
 from taxpilot.backend.data_processing.database import DbConfig, get_connection
 
 
+# Custom Exceptions
+class VectorDBError(Exception):
+    """Base class for exceptions related to vector database operations."""
+    pass
+
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -155,7 +161,8 @@ class VectorDatabase:
             # Memory vector store for testing
             return QdrantClient(":memory:")
         else:
-            raise ValueError(f"Unsupported provider: {self.config.provider}")
+            # Raise custom exception
+            raise VectorDBError(f"Unsupported provider: {self.config.provider}")
     
     def _initialize_collection(self) -> None:
         """Initialize the vector collection if it doesn't exist."""
@@ -211,7 +218,8 @@ class VectorDatabase:
                 )
         except Exception as e:
             logger.error(f"Error initializing collection: {str(e)}")
-            raise
+            # Raise custom exception
+            raise VectorDBError(f"Failed to initialize Qdrant collection: {str(e)}") from e
     
     def _create_indexes(self) -> None:
         """Create indexes for efficient filtering."""
@@ -228,6 +236,8 @@ class VectorDatabase:
                 logger.info(f"Created index on {field}")
             except Exception as e:
                 logger.warning(f"Error creating index on {field}: {str(e)}")
+                # Optionally raise if index creation is critical
+                # raise VectorDBError(f"Failed to create index on {field}: {str(e)}\") from e
     
     def store_embedding(self, embedding: TextEmbedding) -> str:
         """
@@ -273,7 +283,8 @@ class VectorDatabase:
             return point_id
         except Exception as e:
             logger.error(f"Error storing embedding: {str(e)}")
-            raise
+            # Raise custom exception
+            raise VectorDBError(f"Failed to store embedding {embedding.segment_id}: {str(e)}") from e
     
     def store_embeddings_batch(self, embeddings: list[TextEmbedding]) -> list[str]:
         """
@@ -328,7 +339,8 @@ class VectorDatabase:
             try:
                 self.client.upsert(
                     collection_name=self.config.collection_name,
-                    points=batch
+                    points=batch,
+                    wait=True # Wait for operation to complete for accuracy
                 )
                 logger.info(f"Stored batch of {len(batch)} embeddings")
                 
@@ -339,6 +351,8 @@ class VectorDatabase:
                 
             except Exception as e:
                 logger.error(f"Error storing batch {i//batch_size}: {str(e)}")
+                # Raise custom exception or handle partial failure
+                raise VectorDBError(f"Failed to store embedding batch: {str(e)}") from e
                 # Try to store each embedding individually
                 for j, point in enumerate(batch):
                     try:
@@ -351,6 +365,8 @@ class VectorDatabase:
                     except Exception as inner_e:
                         logger.error(f"Error storing individual point: {str(inner_e)}")
                         point_ids[i + j] = ""  # Mark as failed
+                        # Optionally, collect errors instead of raising immediately
+                        # raise VectorDBError(f"Failed to store individual embedding {embeddings[i+j].segment_id}: {str(inner_e)}\") from inner_e
         
         return [pid for pid in point_ids if pid]
     
@@ -445,7 +461,8 @@ class VectorDatabase:
             return results
         except Exception as e:
             logger.error(f"Error performing search: {str(e)}")
-            raise
+            # Raise custom exception
+            raise VectorDBError(f"Search operation failed: {str(e)}") from e
     
     def get_by_segment_id(self, segment_id: str, embedding_model: str | None = None) -> list[SearchResult]:
         """
@@ -508,7 +525,8 @@ class VectorDatabase:
             return results
         except Exception as e:
             logger.error(f"Error retrieving embeddings for segment {segment_id}: {str(e)}")
-            raise
+            # Raise custom exception
+            raise VectorDBError(f"Failed to retrieve embeddings for segment {segment_id}: {str(e)}") from e
     
     def delete_by_law_id(self, law_id: str) -> int:
         """
@@ -546,7 +564,8 @@ class VectorDatabase:
                 return 0
         except Exception as e:
             logger.error(f"Error deleting embeddings for law {law_id}: {str(e)}")
-            raise
+            # Raise custom exception
+            raise VectorDBError(f"Failed to delete embeddings for law {law_id}: {str(e)}") from e
     
     def get_collection_stats(self) -> dict[str, Any]:
         """
@@ -617,7 +636,8 @@ class VectorDatabase:
             return stats
         except Exception as e:
             logger.error(f"Error getting collection stats: {str(e)}")
-            return {"error": str(e)}
+            # Raise custom exception instead of returning error dict
+            raise VectorDBError(f"Failed to get collection stats: {str(e)}") from e
     
     def delete_collection(self) -> bool:
         """Delete the entire vector collection."""
@@ -637,10 +657,14 @@ class VectorDatabase:
                 return True
             else:
                 logger.error(f"Error deleting collection {self.config.collection_name}: {str(e)} ({e.status_code})")
-                return False
+                # Raise custom exception
+                raise VectorDBError(f"Failed to delete collection {self.config.collection_name}: {str(e)}") from e
+                # return False
         except Exception as e:
             logger.error(f"Error deleting collection {self.config.collection_name}: {str(e)}")
-            return False
+            # Raise custom exception
+            raise VectorDBError(f"Failed to delete collection {self.config.collection_name}: {str(e)}") from e
+            # return False
     
     def optimize_collection(self) -> bool:
         """
@@ -666,7 +690,9 @@ class VectorDatabase:
                 return False
         except Exception as e:
             logger.error(f"Error optimizing collection: {str(e)}")
-            return False
+            # Raise custom exception
+            raise VectorDBError(f"Failed to optimize collection: {str(e)}") from e
+            # return False
     
     def backup_collection(self, backup_path: str) -> bool:
         """
@@ -705,7 +731,9 @@ class VectorDatabase:
                 return False
         except Exception as e:
             logger.error(f"Error backing up collection: {str(e)}")
-            return False
+            # Raise custom exception
+            raise VectorDBError(f"Failed to backup collection: {str(e)}") from e
+            # return False
     
     def restore_collection(self, backup_path: str) -> bool:
         """
@@ -724,7 +752,9 @@ class VectorDatabase:
             return False
         except Exception as e:
             logger.error(f"Error restoring collection: {str(e)}")
-            return False
+            # Raise custom exception
+            raise VectorDBError(f"Failed to restore collection: {str(e)}") from e
+            # return False
     
     def sync_with_duckdb(self, force_repopulate: bool = False) -> dict[str, Any]:
         """
@@ -837,6 +867,8 @@ class VectorDatabase:
                         logger.error(f"Error inserting batch into Qdrant: {str(e)}")
                         stats["errors"] += 1 # Count batch insertion error
                         # Optionally, could try individual inserts here as fallback
+                        # Raise custom exception for sync failure
+                        raise VectorDBError(f"Failed during Qdrant upsert in sync: {str(e)}") from e
                 
                 stats["embeddings_inserted_or_updated_in_qdrant"] = total_inserted
                 logger.info(f"Successfully inserted/updated {total_inserted} points in Qdrant.")
@@ -863,9 +895,12 @@ class VectorDatabase:
 
             return stats
         except Exception as e:
+            # Catch broader sync errors and raise custom exception
             logger.error(f"General error during synchronization: {str(e)}", exc_info=True)
             stats["errors"] += 1
-            return {"error": str(e), **stats}
+            # Raise custom exception
+            raise VectorDBError(f"Synchronization with DuckDB failed: {str(e)}") from e
+            # return {"error": str(e), **stats}
     
     def close(self) -> None:
         """Close the vector database connection."""

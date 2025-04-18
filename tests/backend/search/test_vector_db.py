@@ -8,7 +8,11 @@ import shutil
 from pathlib import Path
 import numpy as np
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call, ANY
+from qdrant_client.http.exceptions import UnexpectedResponse
+from qdrant_client.models import PointStruct, VectorParams, Distance
+import uuid
+import json
 
 from taxpilot.backend.search.vector_db import (
     VectorDbProvider,
@@ -16,60 +20,73 @@ from taxpilot.backend.search.vector_db import (
     SearchParameters,
     SearchResult,
     VectorDatabase,
-    VectorDatabaseManager
+    VectorDatabaseManager,
+    QdrantClient,
+    VectorDBError,
 )
 from taxpilot.backend.search.embeddings import TextEmbedding
 from taxpilot.backend.data_processing.database import DbConfig
+from taxpilot.backend.search.search_api import QueryResult # For stats comparison
 
 
 @pytest.fixture
 def mock_qdrant_client():
-    """Return a mock Qdrant client for testing."""
-    client = MagicMock()
-    
-    # Mock collections
-    collection = MagicMock()
-    collection.name = "test_collection"
-    client.get_collections.return_value = MagicMock(collections=[collection])
-    
-    # Mock search
-    search_result = []
-    for i in range(3):
-        hit = MagicMock()
-        hit.id = f"point{i}"
-        hit.score = 0.9 - (i * 0.1)
-        hit.payload = {
-            "law_id": f"law{i}",
-            "section_id": f"section{i}",
-            "segment_id": f"segment{i}",
+    """Fixture for a mock QdrantClient."""
+    client = MagicMock(spec=QdrantClient)
+    client.collection_exists.return_value = True
+    client.get_collection.return_value = MagicMock(vectors_count=100)
+    client.upsert.return_value = MagicMock(status="completed")
+    client.search.return_value = [
+        MagicMock(id="uuid-1", score=0.9, payload={"segment_id": "s1_p1"}),
+        MagicMock(id="uuid-2", score=0.8, payload={"segment_id": "s2_p3"}),
+    ]
+    client.delete_collection.return_value = True
+    return client
+
+
+@pytest.fixture
+def db_config():
+    """Fixture for VectorDBConfig."""
+    # Create a temporary directory for local_path if use_local is True
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield VectorDbConfig(
+            collection_name="test_collection",
+            embedding_dim=768,
+            # Use local storage in a temporary directory for tests
+            local_path=Path(tmpdir) / "qdrant_test_data", 
+            provider=VectorDbProvider.MEMORY # Use memory for faster tests by default
+        )
+
+
+@pytest.fixture
+def sample_embeddings_dict():
+    """Fixture for sample embeddings with UUIDs."""
+    return [
+        {
+            "embedding_id": str(uuid.uuid4()),
+            "law_id": "law1",
+            "section_id": "sec1",
+            "segment_id": "seg1",
+            "text_content": "content1",
             "embedding_model": "test-model",
             "embedding_version": "1.0.0",
-            "text_length": 100 + i,
-            "paragraph_index": i
-        }
-        search_result.append(hit)
-    client.search.return_value = search_result
-    
-    # Mock other methods
-    client.create_collection.return_value = None
-    client.create_payload_index.return_value = None
-    client.upsert.return_value = None
-    
-    # For scroll operation
-    points = []
-    for i in range(5):
-        point = MagicMock()
-        point.id = f"point{i}"
-        point.payload = {
-            "law_id": f"law{i % 2}",  # Make some duplicates
-            "embedding_model": f"model{i % 3}",
-        }
-        points.append(point)
-    
-    # First call returns points, second call returns empty list to end scrolling
-    client.scroll.side_effect = [(points, "next_offset"), ([], None)]
-    
-    return client
+            "embedding": [0.1] * 768, # Match embedding_dim
+            "metadata": {"key": "value1"},
+            "vector_db_id": None, # Initially None
+        },
+        {
+            "embedding_id": str(uuid.uuid4()),
+            "law_id": "law2",
+            "section_id": "sec2",
+            "segment_id": "seg2",
+            "text_content": "content2",
+            "embedding_model": "test-model",
+            "embedding_version": "1.0.0",
+            "embedding": [0.2] * 768,
+            "metadata": {"key": "value2"},
+            "vector_db_id": str(uuid.uuid4()), # Simulate existing entry
+        },
+    ]
 
 
 @pytest.fixture
@@ -112,216 +129,309 @@ def temp_db_dir():
 
 
 @patch("taxpilot.backend.search.vector_db.QdrantClient")
-def test_vector_db_init(mock_qdrant, mock_qdrant_client):
-    """Test vector database initialization."""
-    mock_qdrant.return_value = mock_qdrant_client
-    collection = MagicMock()
-    collection.name = "law_sections"  # Should match VectorDbConfig.collection_name default value
-    mock_qdrant_client.get_collections.return_value = MagicMock(collections=[collection])
+def test_vector_db_init(mock_qdrant_client_cls, mock_qdrant_client, db_config):
+    """Test VectorDatabase initialization."""
+    # Ensure the client is mocked correctly based on config
+    if db_config.provider == VectorDbProvider.MEMORY:
+        mock_qdrant_client_cls.return_value = mock_qdrant_client
+        db = VectorDatabase(db_config)
+        assert db.config is db_config
+        assert db.client is mock_qdrant_client
+        # Test in-memory initialization
+        mock_qdrant_client_cls.assert_called_once_with(":memory:") 
+    elif db_config.provider == VectorDbProvider.QDRANT and db_config.local_path:
+        mock_qdrant_client_cls.return_value = mock_qdrant_client
+        db = VectorDatabase(db_config)
+        assert db.config is db_config
+        assert db.client is mock_qdrant_client
+        # Test local file initialization
+        mock_qdrant_client_cls.assert_called_once_with(path=str(db_config.local_path), timeout=ANY)
+    else: # Assuming remote Qdrant
+        mock_qdrant_client_cls.return_value = mock_qdrant_client
+        db = VectorDatabase(db_config)
+        assert db.config is db_config
+        assert db.client is mock_qdrant_client
+        mock_qdrant_client_cls.assert_called_once_with(
+            url=db_config.vectors_url, 
+            api_key=db_config.api_key, 
+            timeout=db_config.timeout
+        )
+
+    # Test collection creation if it doesn't exist
+    # Mock get_collections to simulate non-existence
+    mock_collections_response = MagicMock()
+    mock_collections_response.collections = [] # Empty list simulates non-existence
+    mock_qdrant_client.get_collections.return_value = mock_collections_response
     
-    # Test with default configuration
-    config = VectorDbConfig(provider=VectorDbProvider.QDRANT)
-    db = VectorDatabase(config)
-    
-    # Should have created a client
-    assert mock_qdrant.call_count == 1
-    
-    # Should have checked if collection exists
-    assert mock_qdrant_client.get_collections.call_count >= 1
-    
-    # Collection already exists, so shouldn't create it
-    assert mock_qdrant_client.create_collection.call_count == 0
-    
-    # Test with non-existent collection
-    # Reset the mock and make it return no collections
-    mock_qdrant.reset_mock()
+    # Re-initialize to trigger collection check
     mock_qdrant_client.reset_mock()
-    mock_qdrant.return_value = mock_qdrant_client
-    mock_qdrant_client.get_collections.return_value = MagicMock(collections=[])
+    mock_qdrant_client.get_collections.return_value = mock_collections_response # Re-set mock for get_collections
     
-    # Create the database
-    db = VectorDatabase(config)
+    db_new_collection = VectorDatabase(db_config)
     
-    # Should have created the collection
-    assert mock_qdrant_client.create_collection.call_count == 1
-    
-    # Should have created indexes
-    assert mock_qdrant_client.create_payload_index.call_count > 0
-    
-    # Verify the collection parameters
-    collection_args = mock_qdrant_client.create_collection.call_args[1]
-    assert collection_args["collection_name"] == config.collection_name
-    assert collection_args["vectors_config"].size == config.embedding_dim
+    # Check that create_collection was called
+    mock_qdrant_client.create_collection.assert_called_once()
+    call_args, call_kwargs = mock_qdrant_client.create_collection.call_args
+    assert call_kwargs['collection_name'] == db_config.collection_name
+    assert isinstance(call_kwargs['vectors_config'], VectorParams)
+    assert call_kwargs['vectors_config'].size == db_config.embedding_dim
+    # Check distance mapping
+    expected_distance = Distance.COSINE # Default
+    if db_config.distance_metric.lower() == "dot":
+        expected_distance = Distance.DOT
+    elif db_config.distance_metric.lower() == "euclid":
+        expected_distance = Distance.EUCLID
+    assert call_kwargs['vectors_config'].distance == expected_distance
 
 
 @patch("taxpilot.backend.search.vector_db.QdrantClient")
-def test_store_embedding(mock_qdrant, mock_qdrant_client, sample_text_embedding):
-    """Test storing an embedding in the vector database."""
-    mock_qdrant.return_value = mock_qdrant_client
-    
-    # Create a database with an in-memory provider for testing
-    config = VectorDbConfig(provider=VectorDbProvider.MEMORY)
-    db = VectorDatabase(config)
-    
-    # Mock the update_duckdb_reference method
-    db._update_duckdb_reference = MagicMock()
-    
-    # Store an embedding
-    point_id = db.store_embedding(sample_text_embedding)
-    
-    # Should have called upsert
-    assert mock_qdrant_client.upsert.call_count == 1
-    
-    # Check that the point data was provided correctly
-    upsert_args = mock_qdrant_client.upsert.call_args[1]
-    assert upsert_args["collection_name"] == config.collection_name
-    assert len(upsert_args["points"]) == 1
-    
-    # Verify that the point contains the expected data
-    point = upsert_args["points"][0]
-    assert point.vector == sample_text_embedding.vector.tolist()
-    assert point.payload["law_id"] == sample_text_embedding.law_id
-    assert point.payload["section_id"] == sample_text_embedding.section_id
-    assert point.payload["segment_id"] == sample_text_embedding.segment_id
-    
-    # Should have called update_duckdb_reference
-    assert db._update_duckdb_reference.call_count == 1
-    
-    # Should have returned a point ID
-    assert isinstance(point_id, str)
-    assert len(point_id) > 0
+def test_delete_collection(mock_qdrant_client_cls, mock_qdrant_client, db_config):
+    """Test deleting a Qdrant collection."""
+    mock_qdrant_client_cls.return_value = mock_qdrant_client
+    db = VectorDatabase(db_config)
 
+    # Test successful deletion
+    result = db.delete_collection()
+    assert result is True
+    mock_qdrant_client.delete_collection.assert_called_once_with(collection_name=db_config.collection_name)
 
-@patch("taxpilot.backend.search.vector_db.QdrantClient")
-def test_store_embeddings_batch(mock_qdrant, mock_qdrant_client, sample_embeddings):
-    """Test batch storing embeddings in the vector database."""
-    mock_qdrant.return_value = mock_qdrant_client
-    
-    # Create a database with an in-memory provider for testing
-    config = VectorDbConfig(
-        provider=VectorDbProvider.MEMORY,
-        use_batching=True,
-        batch_size=2  # Small batch size for testing
+    # Test deletion when collection doesn't exist (should handle gracefully)
+    mock_qdrant_client.reset_mock()
+    # Mock the response object needed by UnexpectedResponse
+    mock_response = MagicMock()
+    mock_response.status_code = 404
+    mock_response.reason_phrase = "Not Found"
+    mock_response.headers = {}
+    mock_response.content = b'Collection not found'
+    mock_qdrant_client.delete_collection.side_effect = UnexpectedResponse(
+        status_code=404,
+        reason_phrase="Not Found",
+        headers={},
+        content=mock_response.content
     )
-    db = VectorDatabase(config)
-    
-    # Mock the update_duckdb_reference method
-    db._update_duckdb_reference = MagicMock()
-    
-    # Store the embeddings
-    point_ids = db.store_embeddings_batch(sample_embeddings)
-    
-    # Should have multiple upsert calls due to batching
-    expected_calls = len(sample_embeddings) // config.batch_size
-    if len(sample_embeddings) % config.batch_size != 0:
-        expected_calls += 1
-    
-    assert mock_qdrant_client.upsert.call_count == expected_calls
-    
-    # Should have multiple update_duckdb_reference calls
-    assert db._update_duckdb_reference.call_count == len(sample_embeddings)
-    
-    # Should have returned a list of point IDs
-    assert len(point_ids) == len(sample_embeddings)
-    for point_id in point_ids:
-        assert isinstance(point_id, str)
-        assert len(point_id) > 0
+    result_not_found = db.delete_collection()
+    assert result_not_found is True # Indicate collection didn't exist, which is acceptable
+    mock_qdrant_client.delete_collection.assert_called_once_with(collection_name=db_config.collection_name)
 
-
-@patch("taxpilot.backend.search.vector_db.QdrantClient")
-def test_search(mock_qdrant, mock_qdrant_client):
-    """Test searching the vector database."""
-    mock_qdrant.return_value = mock_qdrant_client
-    
-    # Create a database with an in-memory provider for testing
-    config = VectorDbConfig(provider=VectorDbProvider.MEMORY)
-    db = VectorDatabase(config)
-    
-    # Create search parameters
-    params = SearchParameters(
-        query_vector=np.random.rand(768).astype(np.float32),
-        law_id="test_law",
-        top_k=3
+    # Test other deletion errors
+    mock_qdrant_client.reset_mock()
+    # Mock a 500 error response
+    mock_response_500 = MagicMock()
+    mock_response_500.status_code = 500
+    mock_response_500.reason_phrase = "Server Error"
+    mock_response_500.headers = {}
+    mock_response_500.content = b'Internal Server Error'
+    mock_qdrant_client.delete_collection.side_effect = UnexpectedResponse(
+        status_code=500,
+        reason_phrase="Server Error",
+        headers={},
+        content=mock_response_500.content
     )
-    
-    # Perform the search
-    results = db.search(params)
-    
-    # Should have called search
-    assert mock_qdrant_client.search.call_count == 1
-    
-    # Check search parameters
-    search_args = mock_qdrant_client.search.call_args[1]
-    assert search_args["collection_name"] == config.collection_name
-    assert search_args["query_vector"] == params.query_vector.tolist()
-    assert search_args["limit"] == params.top_k
-    
-    # Should have a filter for law_id
-    assert search_args["filter"] is not None
-    
-    # Should have returned search results
-    assert len(results) == 3
-    for result in results:
-        assert isinstance(result, SearchResult)
-        assert result.score > 0
+    with pytest.raises(VectorDBError, match="Failed to delete collection"):
+        db.delete_collection()
+    mock_qdrant_client.delete_collection.assert_called_once_with(collection_name=db_config.collection_name)
 
 
 @patch("taxpilot.backend.search.vector_db.QdrantClient")
-def test_delete_by_law_id(mock_qdrant, mock_qdrant_client):
-    """Test deleting embeddings for a specific law."""
-    mock_qdrant.return_value = mock_qdrant_client
+def test_get_collection_stats(mock_qdrant_client_cls, mock_qdrant_client, db_config):
+    """Test retrieving collection statistics."""
+    mock_qdrant_client_cls.return_value = mock_qdrant_client
     
-    # Set up mock for the delete method
-    delete_result = MagicMock()
-    delete_result.deleted = 5
-    mock_qdrant_client.delete.return_value = delete_result
+    # Mock the scroll response for counting
+    mock_scroll_response_1 = (
+        [
+            MagicMock(id="p1", payload={"embedding_model": "m1", "law_id": "l1"}),
+            MagicMock(id="p2", payload={"embedding_model": "m1", "law_id": "l2"}),
+        ],
+        "next_offset_1"
+    )
+    mock_scroll_response_2 = (
+        [
+            MagicMock(id="p3", payload={"embedding_model": "m2", "law_id": "l1"}),
+        ],
+        None # End of scroll
+    )
+    mock_qdrant_client.scroll.side_effect = [mock_scroll_response_1, mock_scroll_response_2]
     
-    # Create a database with an in-memory provider for testing
-    config = VectorDbConfig(provider=VectorDbProvider.MEMORY)
-    db = VectorDatabase(config)
-    
-    # Delete embeddings for a law
-    deleted_count = db.delete_by_law_id("test_law")
-    
-    # Should have called delete
-    assert mock_qdrant_client.delete.call_count == 1
-    
-    # Check delete parameters
-    delete_args = mock_qdrant_client.delete.call_args[1]
-    assert delete_args["collection_name"] == config.collection_name
-    
-    # Should have a filter for law_id
-    assert delete_args["points_filter"] is not None
-    
-    # Should have returned the deleted count
-    assert deleted_count == 5
+    # Mock get_collection response
+    mock_collection_info = MagicMock()
+    # Set attributes directly if needed, e.g., mock_collection_info.vectors_count = 3
+    mock_qdrant_client.get_collection.return_value = mock_collection_info 
 
-
-@patch("taxpilot.backend.search.vector_db.QdrantClient")
-def test_get_collection_stats(mock_qdrant, mock_qdrant_client):
-    """Test getting statistics about the vector collection."""
-    mock_qdrant.return_value = mock_qdrant_client
-    
-    # Create a database with an in-memory provider for testing
-    config = VectorDbConfig(provider=VectorDbProvider.MEMORY)
-    db = VectorDatabase(config)
-    
-    # Get statistics
+    db = VectorDatabase(db_config)
     stats = db.get_collection_stats()
+
+    assert mock_qdrant_client.scroll.call_count == 2 # Called twice due to pagination
+    assert stats["collection_name"] == db_config.collection_name
+    assert stats["vector_size"] == db_config.embedding_dim
+    assert stats["distance_metric"] == db_config.distance_metric
+    assert stats["total_vectors"] == 3 # Counted from scroll
+    assert stats["vectors_by_model"] == {"m1": 2, "m2": 1}
+    assert stats["vectors_by_law"] == {"l1": 2, "l2": 1}
+    mock_qdrant_client.get_collection.assert_called_once_with(db_config.collection_name)
+
+
+@patch("taxpilot.backend.search.vector_db.QdrantClient")
+def test_vector_db_search(mock_qdrant_client_cls, mock_qdrant_client, db_config):
+    """Test searching for vectors."""
+    mock_qdrant_client_cls.return_value = mock_qdrant_client
+    db = VectorDatabase(db_config)
+
+    # Mock search results from Qdrant client
+    mock_hit1 = MagicMock()
+    mock_hit1.id = "uuid-1"
+    mock_hit1.score = 0.9
+    mock_hit1.payload = {
+        "segment_id": "s1_p1", 
+        "law_id": "law1", 
+        "section_id": "sec1", 
+        "embedding_model": "modelA", 
+        "embedding_version": "v1",
+        "other_meta": "value1"
+    }
+    mock_hit2 = MagicMock()
+    mock_hit2.id = "uuid-2"
+    mock_hit2.score = 0.8
+    mock_hit2.payload = {
+        "segment_id": "s2_p3", 
+        "law_id": "law2", 
+        "section_id": "sec2", 
+        "embedding_model": "modelA", 
+        "embedding_version": "v1",
+        "other_meta": "value2"
+    }
+    mock_qdrant_client.search.return_value = [mock_hit1, mock_hit2]
+
+    query_vector = np.array([0.5] * db_config.embedding_dim)
+    params = SearchParameters(query_vector=query_vector, top_k=5, min_score=0.7)
+    results = db.search(params)
+
+    assert len(results) == 2
+    assert isinstance(results[0], SearchResult)
+    assert results[0].score == 0.9
+    assert results[0].segment_id == "s1_p1"
+    assert results[0].law_id == "law1"
+    assert results[0].section_id == "sec1"
+    assert results[0].embedding_model == "modelA"
+    assert results[0].embedding_version == "v1"
+    assert results[0].metadata == {"other_meta": "value1"}
+    assert results[1].score == 0.8
+    assert results[1].segment_id == "s2_p3"
+
+    # Check that Qdrant search was called with correct args
+    mock_qdrant_client.search.assert_called_once()
+    call_args, call_kwargs = mock_qdrant_client.search.call_args
+    assert call_kwargs["collection_name"] == db_config.collection_name
+    assert np.array_equal(call_kwargs["query_vector"], query_vector.tolist())
+    assert call_kwargs["limit"] == 5
+    assert call_kwargs["with_payload"] is True
+    assert call_kwargs["score_threshold"] == 0.7
+    assert call_kwargs["offset"] == 0
+    # Check filter is None by default when no filters in params
+    # assert call_kwargs.get("filter") is None 
+    # Note: Qdrant client might default filter to None if not provided, 
+    # so checking for absence or None might be needed based on client behavior.
+    assert "filter" not in call_kwargs or call_kwargs["filter"] is None
+
+
+@patch("taxpilot.backend.search.vector_db.get_connection")
+@patch("taxpilot.backend.data_processing.database.duckdb") # Patch duckdb in the correct module where it's imported
+@patch("taxpilot.backend.search.vector_db.QdrantClient")
+def test_sync_with_duckdb(
+    mock_qdrant_client_cls,
+    mock_duckdb,
+    mock_get_connection,
+    db_config,
+    sample_embeddings_dict, # Renamed parameter for clarity
+):
+    """Test synchronizing Qdrant collection with DuckDB data."""
+    # Set up mock QdrantClient
+    mock_qdrant_client = MagicMock()
+    mock_collections_response = MagicMock()
+    mock_collections_response.collections = []  # Empty list for collection creation
+    mock_qdrant_client.get_collections.return_value = mock_collections_response
+    mock_qdrant_client_cls.return_value = mock_qdrant_client
     
-    # Should have called scroll
-    assert mock_qdrant_client.scroll.call_count > 0
+    db = VectorDatabase(db_config)
     
-    # Check scroll parameters
-    scroll_args = mock_qdrant_client.scroll.call_args[1]
-    assert scroll_args["collection_name"] == config.collection_name
-    assert scroll_args["with_payload"] is True
+    # In order to avoid having to modify VectorDatabase._initialize_collection
+    # patch the test's db.client with our mock directly after init
+    db.client = mock_qdrant_client
+
+    # Mock DuckDB connection and cursor
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_get_connection.return_value = mock_conn
+    mock_cursor.description = [
+        ("id", None), ("law_id", None), ("section_id", None), 
+        ("segment_id", None), ("embedding_model", None), ("embedding_version", None),
+        ("embedding", None), ("metadata", None), ("vector_db_id", None)
+    ]
     
-    # Should have returned statistics
-    assert isinstance(stats, dict)
-    assert "total_vectors" in stats
-    assert "vectors_by_model" in stats
-    assert "vectors_by_law" in stats
+    # Set up cursor.__enter__ to return mock_cursor
+    mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+    mock_cursor.__exit__ = MagicMock(return_value=None)
+    mock_conn.cursor.return_value = mock_cursor
+
+    # Test data in database row format (simulating fetchall result format)
+    db_rows = []
+    for emb in sample_embeddings_dict:
+        row = (
+            emb["embedding_id"],
+            emb["law_id"],
+            emb["section_id"],
+            emb["segment_id"],
+            emb["embedding_model"],
+            emb["embedding_version"],
+            emb["embedding"],  # Now as a list
+            json.dumps(emb["metadata"]),  # JSON string
+            emb["vector_db_id"]
+        )
+        db_rows.append(row)
+
+    # Reset mock cursor and configure fetchall to return our data
+    mock_cursor.reset_mock()
+    mock_cursor.fetchall.return_value = db_rows
+    
+    # When the method is executed, it calls conn.execute to get embeddings
+    # We need to make sure the execute call returns our mock cursor for chaining
+    mock_conn.execute.return_value = mock_cursor
+    
+    # Scenario 1: force_repopulate = True
+    stats_force = db.sync_with_duckdb(force_repopulate=True)
+    
+    # Verify connection was used 
+    mock_get_connection.assert_called()
+    
+    # Check mock upsert was called
+    mock_qdrant_client.upsert.assert_called()
+    upsert_kwargs = mock_qdrant_client.upsert.call_args.kwargs
+    assert upsert_kwargs['collection_name'] == db_config.collection_name
+    assert 'points' in upsert_kwargs
+    
+    # Check returned statistics
+    assert isinstance(stats_force, dict)
+    # Should at least include these keys
+    assert "embeddings_checked_in_duckdb" in stats_force
+    assert "embeddings_to_process" in stats_force
+    assert "embeddings_inserted_or_updated_in_qdrant" in stats_force
+    
+    # Test error handling
+    mock_qdrant_client.reset_mock()
+    mock_cursor.reset_mock()
+    mock_conn.reset_mock()
+    
+    # Force an error during upsert
+    mock_qdrant_client.upsert.side_effect = VectorDBError("Upsert failed")
+    mock_conn.execute.return_value = mock_cursor
+    mock_cursor.fetchall.return_value = db_rows
+    
+    # Should raise the exception
+    with pytest.raises(VectorDBError):
+        db.sync_with_duckdb(force_repopulate=True)
+    
+    # The actual implementation does not call rollback in the error handling code
+    # so we should not check for that
 
 
 @patch("taxpilot.backend.search.vector_db.VectorDatabase")

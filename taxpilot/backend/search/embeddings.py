@@ -24,6 +24,16 @@ from taxpilot.backend.search.segmentation import TextSegment
 from taxpilot.backend.data_processing.database import get_connection, DbConfig
 
 
+# Custom Exceptions
+class EmbeddingError(Exception):
+    """Base class for exceptions in this module."""
+    pass
+
+class ModelConfigError(EmbeddingError):
+    """Exception raised for errors in model configuration or loading."""
+    pass
+
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -245,7 +255,8 @@ class ModelCache:
                 )
             except Exception as e:
                 logger.error(f"Error loading model {model_name}: {str(e)}")
-                raise
+                # Raise the specific custom exception
+                raise ModelConfigError(f"Failed to load model {model_name}: {str(e)}") from e
         
         return self._models[model_key]
     
@@ -505,7 +516,8 @@ class EmbeddingProcessor:
             logger.info("Embedding database tables and indexes initialized/verified")
         except Exception as e:
             logger.error(f"Error initializing embedding database: {e}")
-            raise
+            # Raise custom exception for DB errors
+            raise EmbeddingError(f"Failed to initialize embedding database: {str(e)}") from e
 
     def process_segments(self, segments: list[TextSegment]) -> list[str]:
         """
@@ -579,7 +591,8 @@ class EmbeddingProcessor:
             return embedding_ids
         except Exception as e:
             logger.error(f"Error storing embeddings: {str(e)}")
-            raise
+            # Raise custom exception for DB errors
+            raise EmbeddingError(f"Failed to store embeddings: {str(e)}") from e
         # Don't close the connection here to avoid connection issues
         # The connection will be managed by the global connection pool
 
@@ -625,7 +638,8 @@ class EmbeddingProcessor:
             )
         except Exception as e:
             logger.error(f"Error retrieving embedding {embedding_id}: {str(e)}")
-            return None
+            # Raise custom exception for DB errors
+            raise EmbeddingError(f"Failed to retrieve embedding {embedding_id}: {str(e)}") from e
         # Don't close connection - managed by connection pool
     
     def get_law_embeddings(self, law_id: str) -> list[TextEmbedding]:
@@ -672,7 +686,8 @@ class EmbeddingProcessor:
             return embeddings
         except Exception as e:
             logger.error(f"Error retrieving embeddings for law {law_id}: {str(e)}")
-            return []
+            # Raise custom exception for DB errors
+            raise EmbeddingError(f"Failed to retrieve embeddings for law {law_id}: {str(e)}") from e
         # Don't close connection - managed by connection pool
     
     def delete_law_embeddings(self, law_id: str) -> int:
@@ -697,7 +712,8 @@ class EmbeddingProcessor:
             return deleted_count
         except Exception as e:
             logger.error(f"Error deleting embeddings for law {law_id}: {str(e)}")
-            return 0
+            # Raise custom exception for DB errors
+            raise EmbeddingError(f"Failed to delete embeddings for law {law_id}: {str(e)}") from e
         # Don't close connection - managed by connection pool
 
 
