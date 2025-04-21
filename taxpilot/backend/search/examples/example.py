@@ -37,10 +37,10 @@ def run_example(search_only: bool = False, debug: bool = False):
     print(" TaxPilot Search Example ".center(80, "="))
     print("="*80 + "\n")
     
-    # Set up the database path - using the existing germanlawfinder.duckdb
-    db_path = Path("data/processed/germanlawfinder.duckdb")
+    # Set up the database path using absolute path from project root
+    db_path = project_root / "data" / "processed" / "germanlawfinder.duckdb"
     
-    print(f"Using database at: {db_path.absolute()}")
+    print(f"Using database at: {db_path}")
     
     if not db_path.exists():
         print(f"Database not found at {db_path}. Please run the data processing pipeline first.")
@@ -67,8 +67,8 @@ def run_example(search_only: bool = False, debug: bool = False):
         chunk_size=512,
         chunk_overlap=128,
         use_accelerator=True,  # Set to True to use MPS or CUDA if available
-        laws_to_index=[],  # Empty list means index ALL laws
-        qdrant_local_path=Path("./qdrant_local_data") 
+        laws_to_index=[]  # Empty list means index ALL laws
+        # No qdrant_local_path means it will use memory mode
     )
     
     # Create the search pipeline

@@ -24,19 +24,21 @@ def run_demo():
     print(" TaxPilot Article-Based Search Demo ".center(80, "="))
     print("="*80 + "\n")
     
-    # Set up the database path - using the existing germanlawfinder.duckdb
-    db_path = Path("data/processed/germanlawfinder.duckdb")
+    # Set up the database path using absolute path from project root
+    db_path = project_root / "data" / "processed" / "germanlawfinder.duckdb"
     
     if not db_path.exists():
         print(f"Database not found at {db_path}. Please run the data processing pipeline first.")
         return
     
-    # Configure the search with local Qdrant
+    # Configure the search with in-memory Qdrant for demo
+    # Note: This won't use the disk-based vector database,
+    # but it will work for demonstration purposes using the DuckDB embeddings
     config = IndexingConfig(
         db_config=DbConfig(db_path=str(db_path)),
         segmentation_strategy=SegmentationStrategy.PARAGRAPH,
-        embedding_model="deepset/gbert-base",
-        qdrant_local_path=Path("./qdrant_local_data")
+        embedding_model="deepset/gbert-base"
+        # No qdrant_local_path means it will use memory mode
     )
     
     print(f"Creating search API with database at {db_path}")
