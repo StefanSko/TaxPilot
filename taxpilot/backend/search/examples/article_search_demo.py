@@ -51,16 +51,35 @@ def run_demo():
     # Note: This won't use the disk-based vector database,
     # but it will work for demonstration purposes using the DuckDB embeddings
     
-    # Import explicitly for the memory provider
+    # Import explicitly for the local provider
     from taxpilot.backend.search.vector_db import VectorDbProvider, VectorDbConfig, VectorDatabaseManager
     
-    # Create an explicit memory-based vector DB config
+    # Create a custom vector DB config that uses fully in-memory mode
+    # This DOES NOT connect to a Qdrant server, it creates an in-process instance
     vector_db_config = VectorDbConfig(
-        provider=VectorDbProvider.MEMORY,  # Force in-memory mode
+        provider=VectorDbProvider.MEMORY,  # Use in-memory mode
         collection_name="law_sections",
         embedding_dim=768,
         db_config=DbConfig(db_path=str(db_path))
     )
+    
+    # We need to patch the _initialize_client method in VectorDatabase to use in-memory mode correctly
+    from types import MethodType
+    
+    def patched_initialize_client(self):
+        """Patched method that correctly initializes an in-memory Qdrant client."""
+        print("Initializing in-memory Qdrant client")
+        from qdrant_client import QdrantClient
+        return QdrantClient(":memory:")
+        
+    # Import the class for patching
+    from taxpilot.backend.search.vector_db import VectorDatabase
+    
+    # Save the original method for later
+    original_initialize_client = VectorDatabase._initialize_client
+    
+    # Patch the method only during this execution
+    VectorDatabase._initialize_client = MethodType(patched_initialize_client, VectorDatabase)
     
     config = IndexingConfig(
         db_config=DbConfig(db_path=str(db_path)),
@@ -152,6 +171,10 @@ def run_demo():
     finally:
         # Clean up resources
         search_api.close()
+        
+        # Restore the original method
+        VectorDatabase._initialize_client = original_initialize_client
+        
         print("\nResources cleaned up.")
 
 
