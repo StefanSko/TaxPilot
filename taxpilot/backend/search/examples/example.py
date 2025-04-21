@@ -45,6 +45,22 @@ def run_example(search_only: bool = False, debug: bool = False):
     if not db_path.exists():
         print(f"Database not found at {db_path}. Please run the data processing pipeline first.")
         return
+        
+    # Additional verification
+    try:
+        from taxpilot.backend.data_processing.database import get_connection
+        conn = get_connection(DbConfig(db_path=str(db_path)))
+        # Check if the sections table exists and has data
+        cursor = conn.execute("SELECT COUNT(*) FROM sections")
+        section_count = cursor.fetchone()[0]
+        cursor = conn.execute("SELECT COUNT(*) FROM section_embeddings")
+        embedding_count = cursor.fetchone()[0]
+        print(f"Database verified: {section_count} sections, {embedding_count} embeddings")
+        if embedding_count == 0:
+            print("WARNING: No embeddings found in database. Search results may be limited.")
+    except Exception as e:
+        print(f"WARNING: Database verification failed: {e}")
+        print("Continuing anyway, but example may not work as expected.")
     
     # --- Get available law IDs --- 
     try:
@@ -60,6 +76,15 @@ def run_example(search_only: bool = False, debug: bool = False):
     # Configure the search pipeline
     print(f"\nConfiguring pipeline to index ALL laws ({len(available_ids)} total)")
     
+    from taxpilot.backend.search.vector_db import VectorDbProvider, VectorDbConfig, VectorDatabaseManager
+    
+    # Create a custom vector DB config that explicitly uses memory provider
+    vector_db_config = VectorDbConfig(
+        provider=VectorDbProvider.MEMORY,  # Force in-memory mode
+        collection_name="law_sections",
+        embedding_dim=768
+    )
+    
     config = IndexingConfig(
         db_config=DbConfig(db_path=str(db_path)),
         segmentation_strategy=SegmentationStrategy.PARAGRAPH,
@@ -73,6 +98,13 @@ def run_example(search_only: bool = False, debug: bool = False):
     
     # Create the search pipeline
     pipeline = SearchPipeline(config)
+    
+    # Override the vector_db_config with our memory-based config
+    pipeline.vector_db_config = vector_db_config
+    # Recreate the vector_db with the new config
+    pipeline.vector_db = VectorDatabaseManager(vector_db_config)
+    # Update search_service to use the new vector_db
+    pipeline.search_service.vector_db = pipeline.vector_db
     
     try:
         # Step 1: Index the laws (conditionally)

@@ -30,10 +30,38 @@ def run_demo():
     if not db_path.exists():
         print(f"Database not found at {db_path}. Please run the data processing pipeline first.")
         return
+        
+    # Additional verification
+    try:
+        from taxpilot.backend.data_processing.database import get_connection
+        conn = get_connection(DbConfig(db_path=str(db_path)))
+        # Check if the sections table exists and has data
+        cursor = conn.execute("SELECT COUNT(*) FROM sections")
+        section_count = cursor.fetchone()[0]
+        cursor = conn.execute("SELECT COUNT(*) FROM section_embeddings")
+        embedding_count = cursor.fetchone()[0]
+        print(f"Database verified: {section_count} sections, {embedding_count} embeddings")
+        if embedding_count == 0:
+            print("WARNING: No embeddings found in database. Search results may be limited.")
+    except Exception as e:
+        print(f"WARNING: Database verification failed: {e}")
+        print("Continuing anyway, but example may not work as expected.")
     
     # Configure the search with in-memory Qdrant for demo
     # Note: This won't use the disk-based vector database,
     # but it will work for demonstration purposes using the DuckDB embeddings
+    
+    # Import explicitly for the memory provider
+    from taxpilot.backend.search.vector_db import VectorDbProvider, VectorDbConfig, VectorDatabaseManager
+    
+    # Create an explicit memory-based vector DB config
+    vector_db_config = VectorDbConfig(
+        provider=VectorDbProvider.MEMORY,  # Force in-memory mode
+        collection_name="law_sections",
+        embedding_dim=768,
+        db_config=DbConfig(db_path=str(db_path))
+    )
+    
     config = IndexingConfig(
         db_config=DbConfig(db_path=str(db_path)),
         segmentation_strategy=SegmentationStrategy.PARAGRAPH,
@@ -43,8 +71,28 @@ def run_demo():
     
     print(f"Creating search API with database at {db_path}")
     
-    # Create search API
-    search_api = create_search_api(config)
+    # Create search API with our custom vector_db_config
+    from taxpilot.backend.search.vector_db import VectorDatabaseManager
+    from taxpilot.backend.search.search_api import SearchService
+    from taxpilot.backend.search.embeddings import TextEmbedder
+    
+    # Create components manually with memory-based vector DB
+    vector_db = VectorDatabaseManager(vector_db_config)
+    
+    # Create embedding config
+    from taxpilot.backend.search.embeddings import EmbeddingConfig
+    embedding_config = EmbeddingConfig(
+        model_name=config.embedding_model,
+        use_accelerator=True
+    )
+    embedder = TextEmbedder(embedding_config)
+    
+    # Create the search API directly
+    search_api = SearchService(
+        vector_db=vector_db,
+        embedder=embedder,
+        db_connection=None  # Will use default
+    )
     
     try:
         # Demo queries to compare segment vs article search
