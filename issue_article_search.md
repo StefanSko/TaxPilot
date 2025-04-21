@@ -42,17 +42,17 @@ Enhance the search system to return complete articles/sections while preserving 
   - [x] Build index of segments belonging to each article
   - [x] Store relationship between segments and articles
 
-### 3. Two-Phase Search Implementation
+### 3. Two-Phase Search Implementation ✅
 
-- [ ] Modify `SearchService.search()` method:
-  - [ ] Phase 1: Execute semantic search on segments (existing approach)
-  - [ ] Phase 2: Group results by article/section
-  - [ ] Aggregate scores for segments within same article
+- [x] Modify `SearchService.search()` method:
+  - [x] Phase 1: Execute semantic search on segments (existing approach)
+  - [x] Phase 2: Group results by article/section
+  - [x] Aggregate scores for segments within same article
 
-- [ ] Add score aggregation strategies:
-  - [ ] Implement max score (best matching segment determines article relevance)
-  - [ ] Implement weighted average (all segment matches contribute to article score)
-  - [ ] Implement count-based boosting (articles with more matching segments rank higher)
+- [x] Add score aggregation strategies:
+  - [x] Implement max score (best matching segment determines article relevance)
+  - [x] Implement weighted average (all segment matches contribute to article score)
+  - [x] Implement count-based boosting (articles with more matching segments rank higher)
 
 ### 4. Result Processing Updates
 
@@ -117,7 +117,7 @@ Enhance the search system to return complete articles/sections while preserving 
 - Created test suite for hierarchical segmentation
 
 ### In Progress 🔄
-- Two-Phase Search Implementation
+- Result Processing Updates
 
 ## Implementation Phases
 

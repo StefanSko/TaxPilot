@@ -7,6 +7,7 @@ It handles:
 - Vector search execution
 - Result formatting and highlighting
 - Caching and optimization
+- Article-based search results grouping
 """
 
 import logging
@@ -68,6 +69,7 @@ class SearchResults:
     limit: int
     query: str
     execution_time_ms: float
+    vector_results: list = None  # Raw vector search results (not visible to API)
 
 
 class SearchService:
@@ -112,7 +114,8 @@ class SearchService:
         limit: int = 10,
         highlight: bool = True,
         cache: bool = True,
-        min_score: float = 0.5
+        min_score: float = 0.5,
+        group_by_article: bool = False  # New parameter for article-based search
     ) -> SearchResults:
         """
         Search for laws matching the query with optional filtering.
@@ -136,7 +139,7 @@ class SearchService:
         query = query.strip()
         
         # Check cache for common queries
-        cache_key = self._get_cache_key(query, filters, page, limit)
+        cache_key = self._get_cache_key(query, filters, page, limit, group_by_article)
         if cache and cache_key in self._cache:
             logger.debug(f"Cache hit for query: {query}")
             return self._cache[cache_key]
@@ -172,8 +175,20 @@ class SearchService:
                 page=page,
                 limit=limit,
                 query=query,
-                execution_time_ms=round((time.time() - start_time) * 1000, 2)
+                execution_time_ms=round((time.time() - start_time) * 1000, 2),
+                vector_results=vector_results  # Include raw vector results for article aggregation
             )
+            
+            # Apply article-based grouping if requested
+            if group_by_article:
+                # Import here to avoid circular imports
+                from taxpilot.backend.search.article_search import ArticleSearchService
+                
+                # Create article search service using this service as base
+                article_service = ArticleSearchService(base_search_service=self)
+                
+                # Convert results to article-based format
+                results = article_service._group_results_by_article(results, query, highlight)
             
             # Update cache for future queries
             if cache:
@@ -190,7 +205,8 @@ class SearchService:
                 page=page,
                 limit=limit,
                 query=query,
-                execution_time_ms=0
+                execution_time_ms=0,
+                vector_results=[]
             )
     
     def _process_filters(self, filters: dict[str, Any]) -> dict[str, Any]:
@@ -492,7 +508,8 @@ class SearchService:
         query: str, 
         filters: dict[str, Any] | None, 
         page: int, 
-        limit: int
+        limit: int,
+        group_by_article: bool = False
     ) -> str:
         """
         Generate a cache key for a search query.
@@ -502,6 +519,7 @@ class SearchService:
             filters: Applied filters
             page: Page number
             limit: Results per page
+            group_by_article: Whether results are grouped by article
             
         Returns:
             String cache key
@@ -512,8 +530,11 @@ class SearchService:
             # Sort the keys for deterministic ordering
             for key in sorted(filters.keys()):
                 filter_str += f"_{key}_{filters[key]}"
+        
+        # Add group_by_article parameter to cache key
+        article_str = "_art" if group_by_article else ""
                 
-        return f"{query}{filter_str}_p{page}_l{limit}"
+        return f"{query}{filter_str}_p{page}_l{limit}{article_str}"
     
     def _update_cache(self, key: str, results: SearchResults) -> None:
         """
