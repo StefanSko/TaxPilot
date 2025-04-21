@@ -75,6 +75,7 @@ class VectorDbConfig:
     optimize_interval: int = 10000  # Points after which to optimize
     timeout: float = 60.0  # Operation timeout in seconds
     db_config: DbConfig | None = None
+    store_hierarchical_data: bool = True  # Whether to store hierarchical information
 
 
 @dataclass
@@ -87,6 +88,10 @@ class SearchResult:
     metadata: dict[str, Any]
     embedding_model: str
     embedding_version: str
+    article_id: str = ""  # ID of the article this segment belongs to
+    hierarchy_path: str = ""  # Full hierarchical path
+    segment_type: str = ""  # Type of segment (article, section, paragraph, etc.)
+    position_in_parent: int = 0  # Position within parent
     
     @property
     def combined_score(self) -> float:
@@ -97,6 +102,13 @@ class SearchResult:
         section importance, etc.
         """
         return self.score
+    
+    @property
+    def article_scope(self) -> str:
+        """
+        Get the article scope (law and article ID) for grouping.
+        """
+        return f"{self.law_id}:{self.article_id}" if self.article_id else f"{self.law_id}:{self.section_id}"
 
 
 @dataclass
@@ -107,12 +119,15 @@ class SearchParameters:
     query_vector: np.ndarray | None = None  # Vector to search for (if pre-computed)
     law_id: str | None = None  # Filter by law ID
     section_id: str | None = None  # Filter by section ID
+    article_id: str | None = None  # Filter by article ID
     top_k: int = 10  # Number of results to return
     min_score: float = 0.7  # Minimum similarity score to include
     embedding_model: str = EmbeddingModelType.DEFAULT.value  # Model to use for embedding
     embedding_version: str | None = None  # Specific version to filter by
     offset: int = 0  # For pagination
     include_metadata: bool = True  # Whether to include metadata in results
+    group_by_article: bool = False  # Whether to group results by article
+    max_segments_per_article: int = 3  # Maximum number of segments to return per article
 
 
 class VectorDatabase:
@@ -186,6 +201,16 @@ class VectorDatabase:
                         "date_created": PayloadSchemaType.DATETIME,
                         "text_length": PayloadSchemaType.INTEGER
                     }
+                    
+                    # Add hierarchical fields if enabled
+                    if self.config.store_hierarchical_data:
+                        hierarchical_fields = {
+                            "article_id": PayloadSchemaType.KEYWORD,
+                            "hierarchy_path": PayloadSchemaType.KEYWORD,
+                            "segment_type": PayloadSchemaType.KEYWORD,
+                            "position_in_parent": PayloadSchemaType.INTEGER
+                        }
+                        self.config.metadata_schema.update(hierarchical_fields)
                 
                 # Create the collection
                 distance = Distance.COSINE
@@ -194,22 +219,17 @@ class VectorDatabase:
                 elif self.config.distance_metric.lower() == "euclidean":
                     distance = Distance.EUCLID
                 
-                create_params = {
-                    "collection_name": self.config.collection_name,
-                    "vectors_config": VectorParams(
+                # Create collection with basic configuration (without metadata_schema)
+                self.client.create_collection(
+                    collection_name=self.config.collection_name,
+                    vectors_config=VectorParams(
                         size=self.config.embedding_dim,
                         distance=distance
                     ),
-                    "on_disk_payload": True,  # Store payload on disk for large collections
-                }
+                    on_disk_payload=True  # Store payload on disk for large collections
+                )
                 
-                # Add metadata_schema only if not in local mode
-                if self.config.local_path is None:
-                    create_params["metadata_schema"] = self.config.metadata_schema
-                    
-                self.client.create_collection(**create_params)
-                
-                # Create index for efficient filtering
+                # Create indexes separately after collection creation
                 self._create_indexes()
                 
                 logger.info(
@@ -226,12 +246,21 @@ class VectorDatabase:
         # Key fields to create indexes for
         key_fields = ["law_id", "section_id", "embedding_model"]
         
+        # Add hierarchical fields if enabled
+        if self.config.store_hierarchical_data:
+            key_fields.extend(["article_id", "hierarchy_path", "segment_type"])
+        
         for field in key_fields:
             try:
+                # Determine schema type based on field name
+                field_schema = PayloadSchemaType.KEYWORD
+                if field == "position_in_parent":
+                    field_schema = PayloadSchemaType.INTEGER
+                
                 self.client.create_payload_index(
                     collection_name=self.config.collection_name,
                     field_name=field,
-                    field_schema=PayloadSchemaType.KEYWORD
+                    field_schema=field_schema
                 )
                 logger.info(f"Created index on {field}")
             except Exception as e:
@@ -262,6 +291,17 @@ class VectorDatabase:
             "date_created": time.time(),
             **embedding.metadata
         }
+        
+        # Add hierarchical data if present in metadata and enabled in config
+        if self.config.store_hierarchical_data and embedding.metadata:
+            if "article_id" in embedding.metadata:
+                metadata["article_id"] = embedding.metadata["article_id"]
+            if "hierarchy_path" in embedding.metadata:
+                metadata["hierarchy_path"] = embedding.metadata["hierarchy_path"]
+            if "segment_type" in embedding.metadata:
+                metadata["segment_type"] = embedding.metadata["segment_type"]
+            if "position_in_parent" in embedding.metadata:
+                metadata["position_in_parent"] = embedding.metadata["position_in_parent"]
         
         # Upsert the embedding
         try:
@@ -321,6 +361,17 @@ class VectorDatabase:
                 "date_created": time.time(),
                 **embedding.metadata
             }
+            
+            # Add hierarchical data if present in metadata and enabled in config
+            if self.config.store_hierarchical_data and embedding.metadata:
+                if "article_id" in embedding.metadata:
+                    metadata["article_id"] = embedding.metadata["article_id"]
+                if "hierarchy_path" in embedding.metadata:
+                    metadata["hierarchy_path"] = embedding.metadata["hierarchy_path"]
+                if "segment_type" in embedding.metadata:
+                    metadata["segment_type"] = embedding.metadata["segment_type"]
+                if "position_in_parent" in embedding.metadata:
+                    metadata["position_in_parent"] = embedding.metadata["position_in_parent"]
             
             points.append(
                 PointStruct(
@@ -401,6 +452,15 @@ class VectorDatabase:
                     )
                 )
                 
+            # Add filter for article_id if provided and we're using hierarchical data
+            if params.article_id and self.config.store_hierarchical_data:
+                conditions.append(
+                    FieldCondition(
+                        key="article_id",
+                        match=MatchValue(value=params.article_id)
+                    )
+                )
+                
             if params.embedding_model:
                 conditions.append(
                     FieldCondition(
@@ -420,7 +480,7 @@ class VectorDatabase:
             if conditions:
                 filter_dict = Filter(must=conditions)
             
-            # Construct search parameters based on whether we're in local mode
+            # Construct basic search parameters
             search_kwargs = {
                 "collection_name": self.config.collection_name,
                 "query_vector": params.query_vector.tolist() if params.query_vector is not None else None,
@@ -430,17 +490,48 @@ class VectorDatabase:
                 "offset": params.offset,
             }
             
-            # Only add filter if we're not in local mode
-            if filter_dict is not None and self.config.local_path is None:
-                search_kwargs["filter"] = filter_dict
-            
-            # Perform the search
-            search_result = self.client.search(**search_kwargs)
+            # Handle filters differently based on local/memory mode or server mode
+            if filter_dict is not None:
+                if self.config.provider == VectorDbProvider.MEMORY or self.config.local_path is not None:
+                    # For local/memory mode, we perform the search without filter first
+                    unfiltered_result = self.client.search(**search_kwargs)
+                    
+                    # Then manually filter the results
+                    filtered_result = []
+                    for hit in unfiltered_result:
+                        if hit.payload:
+                            # Check all filter conditions
+                            matches_all = True
+                            for condition in filter_dict.must:
+                                if isinstance(condition, FieldCondition) and isinstance(condition.match, MatchValue):
+                                    field_value = hit.payload.get(condition.key)
+                                    if field_value != condition.match.value:
+                                        matches_all = False
+                                        break
+                            
+                            if matches_all:
+                                filtered_result.append(hit)
+                    
+                    search_result = filtered_result
+                else:
+                    # For server mode, use the filter directly
+                    search_kwargs["filter"] = filter_dict
+                    search_result = self.client.search(**search_kwargs)
+            else:
+                # No filter, perform normal search
+                search_result = self.client.search(**search_kwargs)
             
             # Convert to our result format
             results = []
             for hit in search_result:
                 if hit.payload:
+                    # Extract hierarchical information if available
+                    article_id = hit.payload.get("article_id", "")
+                    hierarchy_path = hit.payload.get("hierarchy_path", "")
+                    segment_type = hit.payload.get("segment_type", "")
+                    position_in_parent = hit.payload.get("position_in_parent", 0)
+                    
+                    # Construct the result
                     result = SearchResult(
                         segment_id=hit.payload.get("segment_id", ""),
                         law_id=hit.payload.get("law_id", ""),
@@ -448,10 +539,18 @@ class VectorDatabase:
                         score=float(hit.score) if hit.score is not None else 0.0,
                         metadata={
                             k: v for k, v in hit.payload.items()
-                            if k not in ["law_id", "section_id", "segment_id", "embedding_model", "embedding_version"]
+                            if k not in [
+                                "law_id", "section_id", "segment_id", 
+                                "embedding_model", "embedding_version",
+                                "article_id", "hierarchy_path", "segment_type", "position_in_parent"
+                            ]
                         },
                         embedding_model=hit.payload.get("embedding_model", ""),
-                        embedding_version=hit.payload.get("embedding_version", "")
+                        embedding_version=hit.payload.get("embedding_version", ""),
+                        article_id=article_id,
+                        hierarchy_path=hierarchy_path,
+                        segment_type=segment_type,
+                        position_in_parent=position_in_parent
                     )
                     results.append(result)
             
@@ -476,31 +575,53 @@ class VectorDatabase:
             List of search results matching the segment ID
         """
         try:
-            # Prepare filter
-            conditions = [
-                FieldCondition(
-                    key="segment_id",
-                    match=MatchValue(value=segment_id)
+            # In memory mode, we need to scroll through all points
+            # and filter manually since filter param might not be supported
+            if self.config.provider == VectorDbProvider.MEMORY or self.config.local_path is not None:
+                scroll_results = self.client.scroll(
+                    collection_name=self.config.collection_name,
+                    with_payload=True,
+                    limit=100
                 )
-            ]
-            
-            if embedding_model:
-                conditions.append(
+                
+                # Points from scroll_results
+                all_points = scroll_results[0]
+                
+                # Filter manually
+                filtered_points = []
+                for point in all_points:
+                    if point.payload and point.payload.get("segment_id") == segment_id:
+                        if embedding_model is None or point.payload.get("embedding_model") == embedding_model:
+                            filtered_points.append(point)
+                            
+                # Replace scroll_results with filtered version
+                scroll_results = (filtered_points, None)
+            else:
+                # Prepare filter for server mode
+                conditions = [
                     FieldCondition(
-                        key="embedding_model",
-                        match=MatchValue(value=embedding_model)
+                        key="segment_id",
+                        match=MatchValue(value=segment_id)
                     )
+                ]
+                
+                if embedding_model:
+                    conditions.append(
+                        FieldCondition(
+                            key="embedding_model",
+                            match=MatchValue(value=embedding_model)
+                        )
+                    )
+                
+                filter_dict = Filter(must=conditions)
+                
+                # Perform the search with filter
+                scroll_results = self.client.scroll(
+                    collection_name=self.config.collection_name,
+                    filter=filter_dict,
+                    with_payload=True,
+                    limit=100
                 )
-            
-            filter_dict = Filter(must=conditions)
-            
-            # Perform the search
-            scroll_results = self.client.scroll(
-                collection_name=self.config.collection_name,
-                filter=filter_dict,
-                with_payload=True,
-                limit=100
-            )
             
             points = scroll_results[0]
             
@@ -508,6 +629,12 @@ class VectorDatabase:
             results = []
             for point in points:
                 if point.payload:
+                    # Extract hierarchical information if available
+                    article_id = point.payload.get("article_id", "")
+                    hierarchy_path = point.payload.get("hierarchy_path", "")
+                    segment_type = point.payload.get("segment_type", "")
+                    position_in_parent = point.payload.get("position_in_parent", 0)
+                    
                     result = SearchResult(
                         segment_id=point.payload.get("segment_id", ""),
                         law_id=point.payload.get("law_id", ""),
@@ -515,10 +642,18 @@ class VectorDatabase:
                         score=1.0,  # Not a search result, so use perfect score
                         metadata={
                             k: v for k, v in point.payload.items()
-                            if k not in ["law_id", "section_id", "segment_id", "embedding_model", "embedding_version"]
+                            if k not in [
+                                "law_id", "section_id", "segment_id", 
+                                "embedding_model", "embedding_version",
+                                "article_id", "hierarchy_path", "segment_type", "position_in_parent"
+                            ]
                         },
                         embedding_model=point.payload.get("embedding_model", ""),
-                        embedding_version=point.payload.get("embedding_version", "")
+                        embedding_version=point.payload.get("embedding_version", ""),
+                        article_id=article_id,
+                        hierarchy_path=hierarchy_path,
+                        segment_type=segment_type,
+                        position_in_parent=position_in_parent
                     )
                     results.append(result)
             

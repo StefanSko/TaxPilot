@@ -31,16 +31,16 @@ Enhance the search system to return complete articles/sections while preserving 
   - [x] Recognize paragraph and subsection structures
   - [x] Maintain original numbering from legal text
 
-### 2. Vector Database Enhancements
+### 2. Vector Database Enhancements ✅
 
-- [ ] Modify vector database payload structure:
-  - [ ] Add hierarchical identifiers to each vector entry
-  - [ ] Store article-level metadata alongside segment data
-  - [ ] Add structural position information
+- [x] Modify vector database payload structure:
+  - [x] Add hierarchical identifiers to each vector entry
+  - [x] Store article-level metadata alongside segment data
+  - [x] Add structural position information
 
-- [ ] Create article-to-segment mapping:
-  - [ ] Build index of segments belonging to each article
-  - [ ] Store relationship between segments and articles
+- [x] Create article-to-segment mapping:
+  - [x] Build index of segments belonging to each article
+  - [x] Store relationship between segments and articles
 
 ### 3. Two-Phase Search Implementation
 
@@ -117,7 +117,7 @@ Enhance the search system to return complete articles/sections while preserving 
 - Created test suite for hierarchical segmentation
 
 ### In Progress 🔄
-- Vector Database Enhancements
+- Two-Phase Search Implementation
 
 ## Implementation Phases
 
