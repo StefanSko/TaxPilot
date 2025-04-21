@@ -1,10 +1,10 @@
-# Technical Documentation: TaxPilot Search Example (`example.py`) Workflow
+# Technical Documentation: TaxPilot Search Example
 
 ## 1. Introduction
 
-The `example.py` script serves as an end-to-end demonstration and test harness for the core search functionality of TaxPilot. It simulates the process of taking raw legal text data stored in a DuckDB database, processing it for semantic search, indexing it into a vector database (Qdrant), and finally executing search queries against the indexed data.
+The TaxPilot search functionality demonstrates end-to-end semantic search for German tax law. It processes raw legal text from a DuckDB database, segments it while preserving hierarchical structure, generates embeddings, stores them in a vector database (Qdrant), and provides both segment-based and article-based search capabilities.
 
-This document details the data flow, component interactions, and logic involved in each step of the script.
+This document details the data flow, component interactions, and both search approaches available in the system.
 
 ## 2. Configuration and Initialization
 
@@ -142,22 +142,86 @@ After indexing, the script performs several example searches.
     *   Calls `self.vector_db.close()`.
     *   Calls the global `database.close_connection()` to finally close the persistent DuckDB connection.
 
-## 7. Overall Architecture & Data Flow Summary
+## 7. Article-Based Search
+
+The TaxPilot search system provides an enhanced article-based search approach that groups search results by their parent articles, providing more complete and contextual results compared to disconnected text segments.
+
+### Article Search Workflow
+
+When using article-based search (via the `group_by_article=True` parameter):
+
+1. **Initial Search:** The search process begins like standard segment-based search, generating embeddings for the query and searching the vector database.
+
+2. **Result Aggregation:**
+   * After retrieving segment-level results from Qdrant, the `ArticleSearchService` groups these results by their parent article using the `article_id` field stored in the vector database.
+   * For each article, multiple matching segments are collected along with their relevance scores.
+
+3. **Article Scoring:**
+   The system offers multiple scoring strategies to determine article relevance:
+   * **MAX** (default): Uses the highest segment score within each article
+   * **AVERAGE**: Averages all segment scores for each article
+   * **WEIGHTED**: Applies position-based weighting (typically giving more weight to segments near the beginning of articles)
+   * **COUNT_BOOSTED**: Boosts scores based on the number of matching segments in each article
+
+4. **Result Enrichment:**
+   * The service fetches full article content and metadata
+   * It attaches metadata about the number of matching segments
+   * It finds the most relevant segments within each article for highlighting
+
+5. **Result Presentation:**
+   * Results are returned as complete articles (rather than fragments)
+   * Metadata indicates how many segments matched and their positions
+   * Articles are ranked according to the selected scoring strategy
+
+### Usage Example
+
+```python
+# Create search API
+search_api = create_search_api(config)
+
+# Perform standard segment-based search
+segment_results = search_api.search(
+    query="Steuererklärung",
+    limit=5
+)
+
+# Perform article-based search
+article_results = search_api.search(
+    query="Steuererklärung",
+    limit=5,
+    group_by_article=True,  # Enable article grouping
+    score_strategy="weighted"  # Optional, defaults to "max"
+)
+
+# Article results provide complete context
+for article in article_results.results:
+    print(f"Article {article.section_number}: {article.title}")
+    print(f"Score: {article.relevance_score}")
+    print(f"Matching segments: {article.metadata.get('matching_segments', 0)}")
+    print(f"Content: {article.content[:100]}...")
+```
+
+## 8. Overall Architecture & Data Flow Summary
 
 1.  **Source Data:** Laws and Sections reside in DuckDB (`laws`, `sections` tables).
 2.  **Configuration:** `IndexingConfig` drives the process (strategy, model, Qdrant mode).
 3.  **Indexing:**
     *   `SearchPipeline` reads from DuckDB (`sections`).
     *   `segmentation.segment_text` creates `TextSegment` objects.
-    *   `TextEmbedder` generates NumPy embedding vectors using a transformer model (via `ModelCache`).
-    *   `EmbeddingProcessor` stores segment metadata (including start/end indices) and other info as JSON, along with the embedding vector (as BLOB), into the DuckDB `section_embeddings` table.
-    *   `VectorDatabaseManager` stores the embedding vector and key metadata (like `segment_id`, `law_id`, `section_id`) into Qdrant (local file or server).
-4.  **Searching:**
+    *   When hierarchical segmentation is enabled, the system extracts article IDs, subsection numbers, and hierarchy paths.
+    *   `TextEmbedder` generates embedding vectors using a transformer model (via `ModelCache`).
+    *   `EmbeddingProcessor` stores segment metadata (including hierarchical information) into DuckDB.
+    *   `VectorDatabaseManager` stores the embeddings and metadata into Qdrant.
+4.  **Segment-Based Searching:**
     *   `SearchService` takes a text query.
     *   `TextEmbedder` converts the query to a vector.
-    *   `VectorDatabaseManager` searches Qdrant using the query vector, returning `segment_id`s and scores.
-    *   `SearchService` uses the `segment_id`s to query DuckDB (`sections` and `section_embeddings` tables) to fetch full section content and specific segment metadata.
-    *   `SearchService` reconstructs the original segment text using metadata indices and applies highlighting.
-    *   `SearchService` returns formatted `SearchResults`.
+    *   `VectorDatabaseManager` searches Qdrant using the query vector, returning segment data and scores.
+    *   `SearchService` queries DuckDB to fetch full content and applies highlighting.
+    *   Returns individual text segments as search results.
+5.  **Article-Based Searching:**
+    *   Starts with the same segment-based search process.
+    *   `ArticleSearchService` groups segments by article ID.
+    *   Applies article scoring strategy and ranking.
+    *   Returns complete articles with information about matching segments.
 
-This detailed flow outlines how the example script utilizes the different components to build and query a semantic search index for German legal documents.
+This architecture enables both precision searching at the segment level and contextual reading at the article level, addressing the needs of different legal research scenarios.

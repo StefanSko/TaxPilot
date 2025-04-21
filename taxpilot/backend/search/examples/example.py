@@ -10,8 +10,13 @@ This script provides an end-to-end example of:
 import logging
 import time
 import argparse
+import sys
 from pathlib import Path
 import copy
+
+# Add the project root to the Python path
+project_root = Path(__file__).parents[4]
+sys.path.insert(0, str(project_root))
 
 from taxpilot.backend.data_processing.database import DbConfig, get_all_laws
 from taxpilot.backend.search.segmentation import SegmentationStrategy

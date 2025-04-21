@@ -1,18 +1,11 @@
 """
-Test the hierarchical segmentation functionality.
+Unit tests for the hierarchical segmentation functionality.
 
-This script tests the enhanced segmentation system that builds hierarchical
+These tests verify the enhanced segmentation system that builds hierarchical
 document structures for legal texts.
 """
 
-import sys
-import os
-from pathlib import Path
-
-# Add the project root to the Python path
-project_root = Path(__file__).parents[3]
-sys.path.insert(0, str(project_root))
-
+import pytest
 from taxpilot.backend.search.segmentation import (
     segment_text,
     SegmentationConfig,
@@ -23,8 +16,12 @@ from taxpilot.backend.search.segmentation import (
     derive_article_id
 )
 
+
 # Sample German legal text
-SAMPLE_TEXT = """
+@pytest.fixture
+def sample_legal_text() -> str:
+    """Return a sample German legal text for testing."""
+    return """
 § 13 Einkünfte aus Land- und Forstwirtschaft
 
 (1) Einkünfte aus Land- und Forstwirtschaft sind
@@ -67,34 +64,34 @@ je Hektar der vom Inhaber des Betriebs regelmäßig landwirtschaftlich genutzten
 (6) Absatz 5 gilt entsprechend für Grundstücksteile, soweit sie dem Inhaber des Betriebs oder einer zu seinem Haushalt gehörigen Person als Wohnung dienen oder zu eigenen oder zu land- und forstwirtschaftsfremden Zwecken des Steuerpflichtigen genutzt werden. Satz 1 ist auch anzuwenden auf Gebäude oder Gebäudeteile, die nach ihrem Nutzungszusammenhang zum Wohngebäude oder zu land- und forstwirtschaftsfremden Zwecken genutzten Gebäude gehören oder der besonderen Zweckbestimmung dieser Gebäude dienen und untergeordnete Bedeutung haben.
 """
 
-def test_extract_legal_structure():
+
+@pytest.fixture
+def sample_subsection_text() -> str:
+    """Return a sample subsection text for testing."""
+    return """
+(2) Zu den Einkünften im Sinne des Absatzes 1 gehören auch
+
+1. Einkünfte aus einem land- und forstwirtschaftlichen Nebenbetrieb. Als Nebenbetrieb gilt ein Betrieb, der dem land- und forstwirtschaftlichen Hauptbetrieb zu dienen bestimmt ist;
+"""
+
+
+def test_extract_legal_structure(sample_legal_text):
     """Test extracting legal structure from text."""
-    structure = extract_legal_structure(SAMPLE_TEXT)
-    print("Extracted structure:")
-    print(f"Article number: {structure['article_number']}")
-    print(f"Is article: {structure['is_article']}")
-    print(f"Hierarchy components: {structure['hierarchy_components']}")
+    structure = extract_legal_structure(sample_legal_text)
     
     assert structure["article_number"] == "13"
     assert structure["is_article"] == True
     assert "§13" in structure["hierarchy_components"]
     
-    # Test a subsection
-    subsection = """
-    (2) Zu den Einkünften im Sinne des Absatzes 1 gehören auch
-    
-    1. Einkünfte aus einem land- und forstwirtschaftlichen Nebenbetrieb. Als Nebenbetrieb gilt ein Betrieb, der dem land- und forstwirtschaftlichen Hauptbetrieb zu dienen bestimmt ist;
-    """
-    
-    sub_structure = extract_legal_structure(subsection)
-    print("\nSubsection structure:")
-    print(f"Subsections: {sub_structure['subsections']}")
+
+def test_extract_legal_structure_subsection(sample_subsection_text):
+    """Test extracting legal structure from subsection."""
+    sub_structure = extract_legal_structure(sample_subsection_text)
     
     assert "2" in sub_structure["subsections"]
-    
-    return True
 
-def test_hierarchical_segmentation():
+
+def test_hierarchical_segmentation(sample_legal_text):
     """Test hierarchical segmentation of legal text."""
     # Configure segmentation
     config = SegmentationConfig(
@@ -106,18 +103,7 @@ def test_hierarchical_segmentation():
     )
     
     # Perform segmentation
-    segments = segment_text(SAMPLE_TEXT, "estg", "estg_13", config)
-    
-    print(f"\nGenerated {len(segments)} segments")
-    
-    # Test that article ID is correctly set
-    for i, segment in enumerate(segments[:3]):  # Print first 3 segments
-        print(f"\nSegment {i+1}:")
-        print(f"Type: {segment.segment_type}")
-        print(f"Article ID: {segment.article_id}")
-        print(f"Hierarchy path: {segment.hierarchy_path}")
-        print(f"Text excerpt: {segment.text[:50]}...")
-        print(f"Metadata: {segment.metadata}")
+    segments = segment_text(sample_legal_text, "estg", "estg_13", config)
     
     # Verify hierarchy information is present
     assert all(segment.article_id for segment in segments)
@@ -126,10 +112,9 @@ def test_hierarchical_segmentation():
     # Check that article ID is consistently the same for all segments
     article_ids = set(segment.article_id for segment in segments)
     assert len(article_ids) == 1, f"Expected 1 article ID, got {len(article_ids)}: {article_ids}"
-    
-    return True
 
-def test_sentence_level_segmentation():
+
+def test_sentence_level_segmentation(sample_legal_text):
     """Test sentence-level segmentation with hierarchy."""
     # Configure segmentation
     config = SegmentationConfig(
@@ -141,33 +126,15 @@ def test_sentence_level_segmentation():
     )
     
     # Use a smaller sample for sentence segmentation
-    sample = SAMPLE_TEXT.split('\n\n')[0:3]
+    sample = sample_legal_text.split('\n\n')[0:3]
     sample_text = '\n\n'.join(sample)
     
     # Perform segmentation
     segments = segment_text(sample_text, "estg", "estg_13", config)
     
-    print(f"\nGenerated {len(segments)} sentence-level segments")
-    
-    # Print details of the first few segments
-    for i, segment in enumerate(segments[:2]):
-        print(f"\nSentence segment {i+1}:")
-        print(f"Type: {segment.segment_type}")
-        print(f"Hierarchy path: {segment.hierarchy_path}")
-        print(f"Text: {segment.text}")
-    
     # Verify hierarchy paths are unique
     paths = [segment.hierarchy_path for segment in segments]
     assert len(paths) == len(set(paths)), "Hierarchy paths should be unique"
     
-    return True
-
-if __name__ == "__main__":
-    print("Testing hierarchical segmentation...")
-    
-    # Run tests
-    test_extract_legal_structure()
-    test_hierarchical_segmentation()
-    test_sentence_level_segmentation()
-    
-    print("\nAll tests passed!")
+    # Verify segments have article IDs
+    assert all(segment.article_id for segment in segments)
