@@ -1,0 +1,36 @@
+2025-04-21 22:47:07,737 - root - INFO - Establishing new DB connection...
+2025-04-21 22:47:07,737 - root - INFO - DB config updated to: db_path='/Users/skorus01/PycharmProjects/TaxPilot/data/processed/germanlawfinder.duckdb' read_only=False memory_limit=None
+2025-04-21 22:47:07,740 - root - INFO - Successfully connected to database at /Users/skorus01/PycharmProjects/TaxPilot/data/processed/germanlawfinder.duckdb
+2025-04-21 22:47:07,743 - vector_db - INFO - Creating collection law_sections
+2025-04-21 22:47:07,743 - vector_db - INFO - Created index on law_id
+2025-04-21 22:47:07,743 - vector_db - INFO - Created index on section_id
+2025-04-21 22:47:07,743 - vector_db - INFO - Created index on embedding_model
+2025-04-21 22:47:07,743 - vector_db - INFO - Created index on article_id
+2025-04-21 22:47:07,743 - vector_db - INFO - Created index on hierarchy_path
+2025-04-21 22:47:07,743 - vector_db - INFO - Created index on segment_type
+2025-04-21 22:47:07,743 - vector_db - INFO - Collection law_sections created with 768 dimensions and cosine metric
+2025-04-21 22:47:07,754 - embeddings - INFO - MPS backend is available. Using MPS device.
+2025-04-21 22:47:07,755 - embeddings - INFO - Loading model: deepset/gbert-base
+2025-04-21 22:47:10,606 - embeddings - INFO - Flash Attention not available, using standard attention
+2025-04-21 22:47:11,450 - embeddings - INFO - Using torch.float16 on device mps
+2025-04-21 22:47:11,514 - embeddings - INFO - Reloaded model with dtype torch.float16
+2025-04-21 22:47:11,762 - embeddings - INFO - Model loaded in 4.01s. Dimension: 768
+2025-04-21 22:47:11,762 - embeddings - INFO - Initialized TextEmbedder with model deepset/gbert-base running on mps
+2025-04-21 22:52:56,244 - root - INFO - Establishing new DB connection...
+2025-04-21 22:52:56,244 - root - INFO - DB config updated to: db_path='/Users/skorus01/PycharmProjects/TaxPilot/data/processed/germanlawfinder.duckdb' read_only=False memory_limit=None
+2025-04-21 22:52:56,246 - root - INFO - Successfully connected to database at /Users/skorus01/PycharmProjects/TaxPilot/data/processed/germanlawfinder.duckdb
+2025-04-21 22:52:56,249 - vector_db - INFO - Creating collection law_sections
+2025-04-21 22:52:56,249 - vector_db - INFO - Created index on law_id
+2025-04-21 22:52:56,250 - vector_db - INFO - Created index on section_id
+2025-04-21 22:52:56,250 - vector_db - INFO - Created index on embedding_model
+2025-04-21 22:52:56,250 - vector_db - INFO - Created index on article_id
+2025-04-21 22:52:56,250 - vector_db - INFO - Created index on hierarchy_path
+2025-04-21 22:52:56,250 - vector_db - INFO - Created index on segment_type
+2025-04-21 22:52:56,250 - vector_db - INFO - Collection law_sections created with 768 dimensions and cosine metric
+2025-04-21 22:52:56,266 - embeddings - INFO - MPS backend is available. Using MPS device.
+2025-04-21 22:52:56,266 - embeddings - INFO - Loading model: deepset/gbert-base
+2025-04-21 22:52:56,625 - embeddings - INFO - Flash Attention not available, using standard attention
+2025-04-21 22:52:57,460 - embeddings - INFO - Using torch.float16 on device mps
+2025-04-21 22:52:57,524 - embeddings - INFO - Reloaded model with dtype torch.float16
+2025-04-21 22:52:57,778 - embeddings - INFO - Model loaded in 1.51s. Dimension: 768
+2025-04-21 22:52:57,778 - embeddings - INFO - Initialized TextEmbedder with model deepset/gbert-base running on mps

@@ -10,8 +10,13 @@ This script provides an end-to-end example of:
 import logging
 import time
 import argparse
+import sys
 from pathlib import Path
 import copy
+
+# Add the project root to the Python path
+project_root = Path(__file__).parents[4]
+sys.path.insert(0, str(project_root))
 
 from taxpilot.backend.data_processing.database import DbConfig, get_all_laws
 from taxpilot.backend.search.segmentation import SegmentationStrategy
@@ -32,14 +37,30 @@ def run_example(search_only: bool = False, debug: bool = False):
     print(" TaxPilot Search Example ".center(80, "="))
     print("="*80 + "\n")
     
-    # Set up the database path - using the existing germanlawfinder.duckdb
-    db_path = Path("data/processed/germanlawfinder.duckdb")
+    # Set up the database path using absolute path from project root
+    db_path = project_root / "data" / "processed" / "germanlawfinder.duckdb"
     
-    print(f"Using database at: {db_path.absolute()}")
+    print(f"Using database at: {db_path}")
     
     if not db_path.exists():
         print(f"Database not found at {db_path}. Please run the data processing pipeline first.")
         return
+        
+    # Additional verification
+    try:
+        from taxpilot.backend.data_processing.database import get_connection
+        conn = get_connection(DbConfig(db_path=str(db_path)))
+        # Check if the sections table exists and has data
+        cursor = conn.execute("SELECT COUNT(*) FROM sections")
+        section_count = cursor.fetchone()[0]
+        cursor = conn.execute("SELECT COUNT(*) FROM section_embeddings")
+        embedding_count = cursor.fetchone()[0]
+        print(f"Database verified: {section_count} sections, {embedding_count} embeddings")
+        if embedding_count == 0:
+            print("WARNING: No embeddings found in database. Search results may be limited.")
+    except Exception as e:
+        print(f"WARNING: Database verification failed: {e}")
+        print("Continuing anyway, but example may not work as expected.")
     
     # --- Get available law IDs --- 
     try:
@@ -55,6 +76,34 @@ def run_example(search_only: bool = False, debug: bool = False):
     # Configure the search pipeline
     print(f"\nConfiguring pipeline to index ALL laws ({len(available_ids)} total)")
     
+    from taxpilot.backend.search.vector_db import VectorDbProvider, VectorDbConfig, VectorDatabaseManager
+    
+    # Create a custom vector DB config that uses fully in-memory mode
+    # This DOES NOT connect to a Qdrant server, it creates an in-process instance
+    vector_db_config = VectorDbConfig(
+        provider=VectorDbProvider.MEMORY,  # Use in-memory mode
+        collection_name="law_sections",
+        embedding_dim=768
+    )
+    
+    # We need to patch the _initialize_client method in VectorDatabase to use in-memory mode correctly
+    from types import MethodType
+    
+    def patched_initialize_client(self):
+        """Patched method that correctly initializes an in-memory Qdrant client."""
+        print("Initializing in-memory Qdrant client")
+        from qdrant_client import QdrantClient
+        return QdrantClient(":memory:")
+        
+    # Import the class for patching
+    from taxpilot.backend.search.vector_db import VectorDatabase
+    
+    # Save the original method for later
+    original_initialize_client = VectorDatabase._initialize_client
+    
+    # Patch the method only during this execution
+    VectorDatabase._initialize_client = MethodType(patched_initialize_client, VectorDatabase)
+    
     config = IndexingConfig(
         db_config=DbConfig(db_path=str(db_path)),
         segmentation_strategy=SegmentationStrategy.PARAGRAPH,
@@ -62,12 +111,19 @@ def run_example(search_only: bool = False, debug: bool = False):
         chunk_size=512,
         chunk_overlap=128,
         use_accelerator=True,  # Set to True to use MPS or CUDA if available
-        laws_to_index=[],  # Empty list means index ALL laws
-        qdrant_local_path=Path("./qdrant_local_data") 
+        laws_to_index=[]  # Empty list means index ALL laws
+        # No qdrant_local_path means it will use memory mode
     )
     
     # Create the search pipeline
     pipeline = SearchPipeline(config)
+    
+    # Override the vector_db_config with our memory-based config
+    pipeline.vector_db_config = vector_db_config
+    # Recreate the vector_db with the new config
+    pipeline.vector_db = VectorDatabaseManager(vector_db_config)
+    # Update search_service to use the new vector_db
+    pipeline.search_service.vector_db = pipeline.vector_db
     
     try:
         # Step 1: Index the laws (conditionally)
@@ -173,6 +229,10 @@ def run_example(search_only: bool = False, debug: bool = False):
     finally:
         # Clean up resources
         pipeline.close()
+        
+        # Restore the original method
+        VectorDatabase._initialize_client = original_initialize_client
+        
         print("\nResources cleaned up.")
 
 

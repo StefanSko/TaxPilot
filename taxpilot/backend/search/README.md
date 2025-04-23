@@ -49,6 +49,11 @@ The module supports three main segmentation strategies:
 - **Paragraph-level segmentation**: Splits text by paragraphs, best for detailed search
 - **Sentence-level segmentation**: Groups sentences with context, best for precise matching
 
+The module also supports hierarchical segmentation, which preserves information about the legal document structure:
+
+- **Hierarchical segmentation**: Extracts metadata about article numbers, subsections, and paragraph structure
+- **Article-based grouping**: Preserves relationships between segments and their parent articles
+
 #### Usage
 
 ```python
@@ -132,7 +137,7 @@ print(f"Generated and stored {len(embedding_ids)} embeddings")
 
 ## End-to-End Search Pipeline
 
-The `indexing_pipeline.py` module provides an end-to-end solution for indexing laws and searching them.
+The `indexing_pipeline.py` module provides an end-to-end solution for indexing laws and searching them. For complete working examples, see the [examples](./examples) directory.
 
 ### Indexing Laws
 
@@ -175,6 +180,12 @@ python -m taxpilot.backend.search.search_cli "Steuerabzug" --json
 
 # Disable highlighting
 python -m taxpilot.backend.search.search_cli "Abgabenordnung" --no-highlights
+
+# Use article-based search (group results by article)
+python -m taxpilot.backend.search.search_cli "Umsatzsteuer" --group-by-article
+
+# Specify article scoring strategy (max, average, weighted, count_boosted)
+python -m taxpilot.backend.search.search_cli "Steuerabzug" --group-by-article --score-strategy weighted
 ```
 
 ### Using the Search API in Code
@@ -200,6 +211,7 @@ search_api = create_search_api(config)
 
 # Perform search
 try:
+    # Standard segment-based search
     results = search_api.search(
         query="Steuererklärung",
         filters={"law_id": "estg"},  # Optional filter
@@ -207,11 +219,31 @@ try:
         highlight=True
     )
     
-    # Process results
+    # Article-based search 
+    article_results = search_api.search(
+        query="Steuererklärung",
+        filters={"law_id": "estg"},
+        limit=5,
+        highlight=True,
+        group_by_article=True  # Enable article-based grouping
+    )
+    
+    # Process segment-based results
+    print("Segment-based results:")
     for result in results.results:
         print(f"Section: {result.section_number}")
         print(f"Title: {result.title}")
         print(f"Score: {result.relevance_score}")
+        print(f"Content: {result.content[:200]}...")
+        print()
+        
+    # Process article-based results
+    print("Article-based results:")
+    for result in article_results.results:
+        print(f"Article: {result.section_number}")
+        print(f"Title: {result.title}")
+        print(f"Score: {result.relevance_score}")
+        print(f"Matching segments: {result.metadata.get('matching_segments', 0)}")
         print(f"Content: {result.content[:200]}...")
         print()
 finally:
@@ -245,6 +277,20 @@ with modal.run():
 2. **German-specific Handling**: The module includes specialized handling for German legal text characteristics, including section references (§), paragraph numbering, and abbreviations.
 
 3. **Overlapping Strategy**: Overlapping between segments ensures that content near segment boundaries isn't lost in embedding space, improving recall for searches that span these boundaries.
+
+4. **Hierarchical Structure**: The segmentation system preserves hierarchical information about the legal structure (articles, subsections, paragraphs), enabling more meaningful organization of search results.
+
+### Article-based Search
+
+1. **Result Organization**: Search results can be grouped by article rather than showing disconnected text segments, improving readability and context for legal professionals.
+
+2. **Flexible Scoring**: Multiple article scoring strategies are available: 
+   - **Max Score**: Uses the highest segment score within an article (default)
+   - **Average Score**: Averages all segment scores within an article
+   - **Weighted Score**: Weights scores based on segment position within the article
+   - **Count Boosted**: Boosts scores based on the number of matching segments
+
+3. **Metadata Enrichment**: Article results include metadata about how many segments matched the query and their position in the document, providing contextual information.
 
 ### Embedding Generation
 

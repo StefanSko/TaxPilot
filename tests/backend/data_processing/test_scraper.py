@@ -54,38 +54,28 @@ def test_get_law_url(test_config):
 
 def test_scrape_law_page_success(mock_session, test_config):
     """Test scraping the law page to find XML download link."""
-    # Set up mock response
+    # Set up mock response for HEAD request
     mock_response = MagicMock()
-    mock_response.text = """
-    <html>
-        <body>
-            <a href="estg/xml/estg.xml">XML</a>
-            <div class="jnStand">Stand: 2023-01-01</div>
-        </body>
-    </html>
-    """
-    mock_session.get.return_value = mock_response
-    mock_session.get.return_value.raise_for_status.return_value = None
+    mock_session.head.return_value = mock_response
+    mock_session.head.return_value.raise_for_status.return_value = None
     
     # Call the function
-    xml_url, last_updated = scrape_law_page(mock_session, "estg", test_config)
+    xml_url = scrape_law_page(mock_session, "estg", test_config)
     
     # Check results
-    assert xml_url == "https://test.example.com/estg/xml/estg.xml"
-    assert last_updated == "Stand: 2023-01-01"
+    assert xml_url == "https://test.example.com/estg/xml.zip"
 
 
 def test_scrape_law_page_failure(mock_session, test_config):
     """Test error handling when scraping fails."""
     # Set up mock to raise an exception
-    mock_session.get.side_effect = requests.RequestException("Test error")
+    mock_session.head.side_effect = requests.RequestException("Test error")
     
     # Call the function
-    xml_url, last_updated = scrape_law_page(mock_session, "estg", test_config)
+    xml_url = scrape_law_page(mock_session, "estg", test_config)
     
     # Check results
     assert xml_url is None
-    assert last_updated is None
 
 
 @patch("builtins.open", new_callable=mock_open)
@@ -260,7 +250,7 @@ def test_scrape_law_error_no_url(mock_scrape, mock_session, test_config):
     """Test error handling when no XML URL is found."""
     # Set up mocks
     mock_session.return_value = MagicMock()
-    mock_scrape.return_value = (None, None)  # No URL found
+    mock_scrape.return_value = None  # No URL found
     
     # Call the function
     result = scrape_law("estg", test_config)
