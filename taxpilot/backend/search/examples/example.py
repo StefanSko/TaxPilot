@@ -18,7 +18,7 @@ import copy
 project_root = Path(__file__).parents[4]
 sys.path.insert(0, str(project_root))
 
-from taxpilot.backend.data_processing.database import DbConfig, get_all_laws
+from taxpilot.backend.data_processing.database import DbConfig, get_all_laws, ensure_schema_current
 from taxpilot.backend.search.segmentation import SegmentationStrategy
 from taxpilot.backend.search.indexing_pipeline import IndexingConfig, SearchPipeline
 from taxpilot.backend.search.embeddings import EmbeddingModelType
@@ -46,10 +46,19 @@ def run_example(search_only: bool = False, debug: bool = False):
         print(f"Database not found at {db_path}. Please run the data processing pipeline first.")
         return
         
+    # Ensure database schema is current
+    db_config = DbConfig(db_path=str(db_path))
+    print("Checking database schema...")
+    schema_updated = ensure_schema_current()
+    if not schema_updated:
+        print("WARNING: Failed to update database schema. The example may not work correctly.")
+    else:
+        print("Database schema is current.")
+        
     # Additional verification
     try:
         from taxpilot.backend.data_processing.database import get_connection
-        conn = get_connection(DbConfig(db_path=str(db_path)))
+        conn = get_connection(db_config)
         # Check if the sections table exists and has data
         cursor = conn.execute("SELECT COUNT(*) FROM sections")
         section_count = cursor.fetchone()[0]
@@ -58,6 +67,19 @@ def run_example(search_only: bool = False, debug: bool = False):
         print(f"Database verified: {section_count} sections, {embedding_count} embeddings")
         if embedding_count == 0:
             print("WARNING: No embeddings found in database. Search results may be limited.")
+            
+        # Verify section_embeddings has extended schema
+        try:
+            cursor = conn.execute("""
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_name = 'section_embeddings' AND column_name = 'law_id'
+            """)
+            has_extended_schema = cursor.fetchone()[0] > 0
+            print(f"Section embeddings table has{'✓' if has_extended_schema else ' NOT'} been migrated to extended schema")
+        except Exception as schema_e:
+            print(f"WARNING: Could not verify section_embeddings schema: {schema_e}")
+            
     except Exception as e:
         print(f"WARNING: Database verification failed: {e}")
         print("Continuing anyway, but example may not work as expected.")

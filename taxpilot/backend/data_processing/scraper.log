@@ -1,0 +1,68 @@
+2025-04-23 18:11:37,105 - pipeline_tracking - INFO - Tracking database initialized successfully
+2025-04-23 18:11:37,432 - pipeline_tracking - INFO - Started tracking execution exec_20250423_181137_65255
+2025-04-23 18:11:37,436 - law_pipeline - INFO - Starting law processing pipeline (Execution ID: exec_20250423_181137_65255)
+2025-04-23 18:11:37,436 - root - INFO - Establishing new DB connection...
+2025-04-23 18:11:37,439 - root - INFO - Successfully connected to database at data/processed/germanlawfinder.duckdb
+2025-04-23 18:11:37,441 - law_pipeline - INFO - Started database transaction
+2025-04-23 18:11:37,441 - law_pipeline - INFO - Starting law scraping
+2025-04-23 18:11:37,441 - law_scraper - INFO - Starting scheduled scraping of tax laws
+2025-04-23 18:11:37,441 - law_scraper - INFO - Starting to scrape estg (Einkommensteuergesetz)
+2025-04-23 18:11:37,442 - law_scraper - INFO - Trying direct XML URL: https://www.gesetze-im-internet.de/estg/xml.zip
+2025-04-23 18:11:37,850 - law_scraper - INFO - Found direct XML URL: https://www.gesetze-im-internet.de/estg/xml.zip
+2025-04-23 18:11:37,850 - law_scraper - INFO - Downloading XML from https://www.gesetze-im-internet.de/estg/xml.zip
+2025-04-23 18:11:38,067 - law_scraper - INFO - Downloaded XML file to data/estg/xml_20250423_181138.zip
+2025-04-23 18:11:38,068 - law_scraper - INFO - No previous version found for estg. This is a new law.
+2025-04-23 18:11:38,069 - law_scraper - INFO - Saved metadata to data/estg/metadata.json
+2025-04-23 18:11:40,075 - law_scraper - INFO - Starting to scrape kstg_1977 (Körperschaftsteuergesetz)
+2025-04-23 18:11:40,076 - law_scraper - INFO - Trying direct XML URL: https://www.gesetze-im-internet.de/kstg_1977/xml.zip
+2025-04-23 18:11:40,285 - law_scraper - INFO - Found direct XML URL: https://www.gesetze-im-internet.de/kstg_1977/xml.zip
+2025-04-23 18:11:40,285 - law_scraper - INFO - Downloading XML from https://www.gesetze-im-internet.de/kstg_1977/xml.zip
+2025-04-23 18:11:40,401 - law_scraper - INFO - Downloaded XML file to data/kstg_1977/xml_20250423_181140.zip
+2025-04-23 18:11:40,402 - law_scraper - INFO - No previous version found for kstg_1977. This is a new law.
+2025-04-23 18:11:40,403 - law_scraper - INFO - Saved metadata to data/kstg_1977/metadata.json
+2025-04-23 18:11:42,410 - law_scraper - INFO - Starting to scrape ustg_1980 (Umsatzsteuergesetz)
+2025-04-23 18:11:42,411 - law_scraper - INFO - Trying direct XML URL: https://www.gesetze-im-internet.de/ustg_1980/xml.zip
+2025-04-23 18:11:42,637 - law_scraper - INFO - Found direct XML URL: https://www.gesetze-im-internet.de/ustg_1980/xml.zip
+2025-04-23 18:11:42,637 - law_scraper - INFO - Downloading XML from https://www.gesetze-im-internet.de/ustg_1980/xml.zip
+2025-04-23 18:11:42,770 - law_scraper - INFO - Downloaded XML file to data/ustg_1980/xml_20250423_181142.zip
+2025-04-23 18:11:42,772 - law_scraper - INFO - No previous version found for ustg_1980. This is a new law.
+2025-04-23 18:11:42,772 - law_scraper - INFO - Saved metadata to data/ustg_1980/metadata.json
+2025-04-23 18:11:44,779 - law_scraper - INFO - Starting to scrape ao_1977 (Abgabenordnung)
+2025-04-23 18:11:44,780 - law_scraper - INFO - Trying direct XML URL: https://www.gesetze-im-internet.de/ao_1977/xml.zip
+2025-04-23 18:11:44,993 - law_scraper - INFO - Found direct XML URL: https://www.gesetze-im-internet.de/ao_1977/xml.zip
+2025-04-23 18:11:44,993 - law_scraper - INFO - Downloading XML from https://www.gesetze-im-internet.de/ao_1977/xml.zip
+2025-04-23 18:11:45,170 - law_scraper - INFO - Downloaded XML file to data/ao_1977/xml_20250423_181145.zip
+2025-04-23 18:11:45,172 - law_scraper - INFO - No previous version found for ao_1977. This is a new law.
+2025-04-23 18:11:45,173 - law_scraper - INFO - Saved metadata to data/ao_1977/metadata.json
+2025-04-23 18:11:47,178 - law_scraper - INFO - Starting to scrape gewstg (Gewerbesteuergesetz)
+2025-04-23 18:11:47,179 - law_scraper - INFO - Trying direct XML URL: https://www.gesetze-im-internet.de/gewstg/xml.zip
+2025-04-23 18:11:47,395 - law_scraper - INFO - Found direct XML URL: https://www.gesetze-im-internet.de/gewstg/xml.zip
+2025-04-23 18:11:47,395 - law_scraper - INFO - Downloading XML from https://www.gesetze-im-internet.de/gewstg/xml.zip
+2025-04-23 18:11:47,478 - law_scraper - INFO - Downloaded XML file to data/gewstg/xml_20250423_181147.zip
+2025-04-23 18:11:47,479 - law_scraper - INFO - No previous version found for gewstg. This is a new law.
+2025-04-23 18:11:47,479 - law_scraper - INFO - Saved metadata to data/gewstg/metadata.json
+2025-04-23 18:11:49,485 - law_scraper - INFO - Scraping completed in 12.04 seconds
+2025-04-23 18:11:49,486 - law_scraper - INFO - Results summary: {'new': 5, 'updated': 0, 'unchanged': 0, 'error': 0}
+2025-04-23 18:11:49,486 - law_pipeline - INFO - Processing law estg
+2025-04-23 18:11:49,486 - law_pipeline - INFO - Parsing law file for estg
+2025-04-23 18:11:49,491 - xml_parser - INFO - Parsing XML file BJNR010050934.xml from ZIP archive data/estg/xml_20250423_181138.zip
+2025-04-23 18:11:49,790 - law_pipeline - INFO - Adding new law BJNR010050934
+2025-04-23 18:11:49,855 - law_pipeline - INFO - Processing law kstg_1977
+2025-04-23 18:11:49,855 - law_pipeline - INFO - Parsing law file for kstg_1977
+2025-04-23 18:11:49,856 - xml_parser - INFO - Parsing XML file BJNR025990976.xml from ZIP archive data/kstg_1977/xml_20250423_181140.zip
+2025-04-23 18:11:49,897 - law_pipeline - INFO - Adding new law BJNR025990976
+2025-04-23 18:11:49,909 - law_pipeline - INFO - Processing law ustg_1980
+2025-04-23 18:11:49,909 - law_pipeline - INFO - Parsing law file for ustg_1980
+2025-04-23 18:11:49,910 - xml_parser - INFO - Parsing XML file BJNR119530979.xml from ZIP archive data/ustg_1980/xml_20250423_181142.zip
+2025-04-23 18:11:50,003 - law_pipeline - INFO - Adding new law BJNR119530979
+2025-04-23 18:11:50,027 - law_pipeline - INFO - Processing law ao_1977
+2025-04-23 18:11:50,027 - law_pipeline - INFO - Parsing law file for ao_1977
+2025-04-23 18:11:50,028 - xml_parser - INFO - Parsing XML file BJNR006130976.xml from ZIP archive data/ao_1977/xml_20250423_181145.zip
+2025-04-23 18:11:50,184 - law_pipeline - INFO - Adding new law BJNR006130976
+2025-04-23 18:11:50,300 - law_pipeline - INFO - Processing law gewstg
+2025-04-23 18:11:50,300 - law_pipeline - INFO - Parsing law file for gewstg
+2025-04-23 18:11:50,300 - xml_parser - INFO - Parsing XML file BJNR009790936.xml from ZIP archive data/gewstg/xml_20250423_181147.zip
+2025-04-23 18:11:50,322 - law_pipeline - INFO - Adding new law BJNR009790936
+2025-04-23 18:11:50,338 - law_pipeline - INFO - Committed database transaction
+2025-04-23 18:11:50,348 - pipeline_tracking - INFO - Updated execution exec_20250423_181137_65255 status to completed
+2025-04-23 18:11:50,354 - law_pipeline - INFO - Pipeline completed with summary: {'success': 5, 'error': 0, 'unchanged': 0, 'skipped': 0, 'sections_processed': 1098}

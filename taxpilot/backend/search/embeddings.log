@@ -1,0 +1,4 @@
+2025-04-18 11:22:05,929 - embeddings - INFO - Loading model: deepset/gbert-base
+2025-04-18 11:22:05,929 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: deepset/gbert-base
+2025-04-18 11:22:06,295 - sentence_transformers.SentenceTransformer - WARNING - No sentence-transformers model found with name deepset/gbert-base. Creating a new one with mean pooling.
+2025-04-18 11:22:08,404 - embeddings - ERROR - Error loading model deepset/gbert-base: deepset/gbert-base does not appear to have a file named pytorch_model.bin but there is a file for TensorFlow weights. Use `from_tf=True` to load this model from those weights.

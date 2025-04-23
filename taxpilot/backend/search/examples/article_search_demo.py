@@ -13,7 +13,7 @@ from pathlib import Path
 project_root = Path(__file__).parents[4]
 sys.path.insert(0, str(project_root))
 
-from taxpilot.backend.data_processing.database import DbConfig
+from taxpilot.backend.data_processing.database import DbConfig, ensure_schema_current
 from taxpilot.backend.search.indexing_pipeline import IndexingConfig, create_search_api
 from taxpilot.backend.search.segmentation import SegmentationStrategy
 
@@ -30,11 +30,20 @@ def run_demo():
     if not db_path.exists():
         print(f"Database not found at {db_path}. Please run the data processing pipeline first.")
         return
+    
+    # Ensure database schema is current
+    db_config = DbConfig(db_path=str(db_path))
+    print("Checking database schema...")
+    schema_updated = ensure_schema_current()
+    if not schema_updated:
+        print("WARNING: Failed to update database schema. The example may not work correctly.")
+    else:
+        print("Database schema is current.")
         
     # Additional verification
     try:
         from taxpilot.backend.data_processing.database import get_connection
-        conn = get_connection(DbConfig(db_path=str(db_path)))
+        conn = get_connection(db_config)
         # Check if the sections table exists and has data
         cursor = conn.execute("SELECT COUNT(*) FROM sections")
         section_count = cursor.fetchone()[0]
@@ -43,6 +52,18 @@ def run_demo():
         print(f"Database verified: {section_count} sections, {embedding_count} embeddings")
         if embedding_count == 0:
             print("WARNING: No embeddings found in database. Search results may be limited.")
+            
+        # Verify section_embeddings has extended schema
+        try:
+            cursor = conn.execute("""
+                SELECT COUNT(*)
+                FROM information_schema.columns
+                WHERE table_name = 'section_embeddings' AND column_name = 'law_id'
+            """)
+            has_extended_schema = cursor.fetchone()[0] > 0
+            print(f"Section embeddings table has{'✓' if has_extended_schema else ' NOT'} been migrated to extended schema")
+        except Exception as schema_e:
+            print(f"WARNING: Could not verify section_embeddings schema: {schema_e}")
     except Exception as e:
         print(f"WARNING: Database verification failed: {e}")
         print("Continuing anyway, but example may not work as expected.")
@@ -82,7 +103,7 @@ def run_demo():
     VectorDatabase._initialize_client = MethodType(patched_initialize_client, VectorDatabase)
     
     config = IndexingConfig(
-        db_config=DbConfig(db_path=str(db_path)),
+        db_config=db_config,
         segmentation_strategy=SegmentationStrategy.PARAGRAPH,
         embedding_model="deepset/gbert-base"
         # No qdrant_local_path means it will use memory mode
