@@ -40,10 +40,18 @@ class Section(TypedDict):
     metadata: dict[str, Any]
 
 
-class SectionEmbedding(TypedDict):
+class SectionEmbedding(TypedDict, total=False):
     """Type representing a section embedding record."""
+    id: str
+    law_id: str
     section_id: str
+    segment_id: str
     embedding: list[float]
+    embedding_model: str
+    embedding_version: str
+    vector_db_id: NotRequired[str]
+    metadata: NotRequired[dict[str, Any]]
+    created_at: NotRequired[str]
 
 
 # Pydantic models for configuration
@@ -212,15 +220,153 @@ def initialize_database() -> None:
     )
     """)
     
-    # Create the section_embeddings table
+    # Create the section_embeddings table with extended schema
     conn.execute("""
     CREATE TABLE IF NOT EXISTS section_embeddings (
+        id VARCHAR PRIMARY KEY,
+        law_id VARCHAR,
         section_id VARCHAR,
-        embedding FLOAT[384],                 -- Vector embedding (dimension depends on model)
-        PRIMARY KEY (section_id),
+        segment_id VARCHAR,
+        embedding_model VARCHAR,
+        embedding_version VARCHAR,
+        embedding FLOAT[768],                 -- Vector embedding (dimension depends on model)
+        vector_db_id VARCHAR, 
+        metadata JSON,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (section_id) REFERENCES sections(id)
     )
     """)
+
+
+def migrate_section_embeddings_schema() -> None:
+    """
+    Migrate the section_embeddings table to the new schema.
+    
+    This function handles the migration from the old schema (with just section_id and embedding)
+    to the new extended schema with additional fields. It preserves existing data.
+    """
+    conn = get_connection()
+    logging.info("Starting migration of section_embeddings table to new schema")
+    
+    try:
+        # Check if the table exists and if it has the old schema
+        result = conn.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'section_embeddings' AND column_name = 'law_id'
+        """).fetchone()
+        
+        if result is not None:
+            logging.info("section_embeddings table already has new schema, skipping migration")
+            return
+        
+        logging.info("Creating temporary backup of section_embeddings data")
+        
+        # Create temp table to backup existing data
+        conn.execute("CREATE TABLE section_embeddings_backup AS SELECT * FROM section_embeddings")
+        
+        # Get count for verification
+        backup_count = conn.execute("SELECT COUNT(*) FROM section_embeddings_backup").fetchone()[0]
+        logging.info(f"Backed up {backup_count} rows to temporary table")
+        
+        # Drop existing table
+        conn.execute("DROP TABLE section_embeddings")
+        logging.info("Dropped old section_embeddings table")
+        
+        # Create new table with extended schema
+        conn.execute("""
+        CREATE TABLE section_embeddings (
+            id VARCHAR PRIMARY KEY,
+            law_id VARCHAR,
+            section_id VARCHAR,
+            segment_id VARCHAR,
+            embedding_model VARCHAR,
+            embedding_version VARCHAR,
+            embedding FLOAT[768],
+            vector_db_id VARCHAR, 
+            metadata JSON,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (section_id) REFERENCES sections(id)
+        )
+        """)
+        logging.info("Created new section_embeddings table with extended schema")
+        
+        # Create temp column to generate UUIDs for the id primary key
+        conn.execute("ALTER TABLE section_embeddings_backup ADD COLUMN temp_id VARCHAR")
+        conn.execute("UPDATE section_embeddings_backup SET temp_id = gen_random_uuid()")
+        
+        # Move data from backup to new table
+        # We need to join with sections to get the law_id
+        conn.execute("""
+        INSERT INTO section_embeddings (
+            id, law_id, section_id, segment_id, embedding, embedding_model, embedding_version
+        )
+        SELECT 
+            b.temp_id, 
+            s.law_id, 
+            b.section_id, 
+            b.section_id, -- Use section_id as segment_id for now
+            b.embedding,
+            'migrated',  -- Default embedding model
+            '1.0.0'      -- Default version
+        FROM 
+            section_embeddings_backup b
+        JOIN
+            sections s ON b.section_id = s.id
+        """)
+        
+        # Set default metadata
+        conn.execute("UPDATE section_embeddings SET metadata = '{}'")
+        
+        # Create necessary indexes
+        conn.execute("CREATE INDEX idx_section_embeddings_law_id ON section_embeddings(law_id)")
+        conn.execute("CREATE INDEX idx_section_embeddings_section_id ON section_embeddings(section_id)")
+        conn.execute("CREATE INDEX idx_section_embeddings_segment_id ON section_embeddings(segment_id)")
+        conn.execute("CREATE INDEX idx_section_embeddings_model_version ON section_embeddings(embedding_model, embedding_version)")
+        
+        # Get count for verification
+        migrated_count = conn.execute("SELECT COUNT(*) FROM section_embeddings").fetchone()[0]
+        logging.info(f"Migrated {migrated_count} rows to new schema")
+        
+        # Drop backup table
+        conn.execute("DROP TABLE section_embeddings_backup")
+        logging.info("Removed temporary backup table")
+        
+        logging.info("Migration of section_embeddings table completed successfully")
+        
+    except Exception as e:
+        logging.error(f"Error during section_embeddings migration: {str(e)}")
+        # If we failed after dropping the original table but before completing migration,
+        # try to restore from backup
+        try:
+            # Check if we need to restore
+            table_exists = conn.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_name = 'section_embeddings'
+            """).fetchone()
+            
+            backup_exists = conn.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_name = 'section_embeddings_backup'
+            """).fetchone()
+            
+            if backup_exists is not None:
+                if table_exists is None:
+                    logging.warning("Attempting to restore section_embeddings from backup")
+                    conn.execute("CREATE TABLE section_embeddings AS SELECT section_id, embedding FROM section_embeddings_backup")
+                    conn.execute("ALTER TABLE section_embeddings ADD PRIMARY KEY (section_id)")
+                    restored_count = conn.execute("SELECT COUNT(*) FROM section_embeddings").fetchone()[0]
+                    logging.info(f"Restored {restored_count} rows from backup")
+                
+                logging.info("Cleaning up backup table")
+                conn.execute("DROP TABLE IF EXISTS section_embeddings_backup")
+        except Exception as restore_error:
+            logging.error(f"Failed to restore from backup: {str(restore_error)}")
+        
+        # Re-raise the original error
+        raise
 
 
 def run_migration(version: int) -> None:
@@ -250,8 +396,15 @@ def run_migration(version: int) -> None:
         # Initial schema creation
         initialize_database()
     elif version == 2:
-        # Example future migration
-        conn.execute("ALTER TABLE laws ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true")
+        # Skip this migration if it causes problems
+        try:
+            # Example future migration
+            conn.execute("ALTER TABLE laws ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true")
+        except Exception as e:
+            logging.warning(f"Skipping migration 2 due to error: {str(e)}")
+    elif version == 3:
+        # Update section_embeddings table schema
+        migrate_section_embeddings_schema()
     
     # Record that the migration was applied
     conn.execute(f"INSERT INTO migrations (version) VALUES ({version})")
@@ -468,13 +621,99 @@ def insert_section_embedding(embedding: SectionEmbedding) -> None:
     """
     conn = get_connection()
     
-    conn.execute("""
-    INSERT INTO section_embeddings (section_id, embedding)
-    VALUES (?, ?)
-    """, (
-        embedding["section_id"],
-        embedding["embedding"]
-    ))
+    # Check if this is using the old or new schema
+    # For backward compatibility, we support both
+    has_section_id_only = "section_id" in embedding and "embedding" in embedding and len(embedding) == 2
+    
+    if has_section_id_only:
+        # Check if table has extended schema
+        try:
+            result = conn.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'section_embeddings' AND column_name = 'law_id'
+            """).fetchone()
+            
+            if result is not None:
+                # Table has extended schema but old-style embedding input
+                # Generate an ID and get law_id from sections table
+                import uuid
+                
+                embedding_id = str(uuid.uuid4())
+                
+                # Get law_id from section
+                section_result = conn.execute("""
+                    SELECT law_id FROM sections WHERE id = ?
+                """, (embedding["section_id"],)).fetchone()
+                
+                if section_result:
+                    law_id = section_result[0]
+                    
+                    # Insert with extended schema
+                    conn.execute("""
+                    INSERT INTO section_embeddings (
+                        id, law_id, section_id, segment_id, embedding, 
+                        embedding_model, embedding_version, metadata
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        embedding_id,
+                        law_id,
+                        embedding["section_id"],
+                        embedding["section_id"],  # Use section_id as segment_id
+                        embedding["embedding"],
+                        "default",  # Default model
+                        "1.0.0",    # Default version
+                        "{}"        # Empty metadata
+                    ))
+                    return
+            
+            # Fall back to simple insert if table has old schema
+            conn.execute("""
+            INSERT INTO section_embeddings (section_id, embedding)
+            VALUES (?, ?)
+            """, (
+                embedding["section_id"],
+                embedding["embedding"]
+            ))
+            
+        except Exception as e:
+            logging.error(f"Error determining schema for section_embeddings insert: {str(e)}")
+            # Fall back to simple insert
+            conn.execute("""
+            INSERT INTO section_embeddings (section_id, embedding)
+            VALUES (?, ?)
+            """, (
+                embedding["section_id"],
+                embedding["embedding"]
+            ))
+    else:
+        # Handle new schema embedding input with full fields
+        # This would be a complete TextEmbedding object converted to a dict
+        try:
+            # If id is not provided, generate one
+            embedding_id = embedding.get("id", str(uuid.uuid4()))
+            
+            conn.execute("""
+            INSERT INTO section_embeddings (
+                id, law_id, section_id, segment_id, embedding_model, 
+                embedding_version, embedding, vector_db_id, metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                embedding_id,
+                embedding.get("law_id", ""),
+                embedding.get("section_id", ""),
+                embedding.get("segment_id", ""),
+                embedding.get("embedding_model", "default"),
+                embedding.get("embedding_version", "1.0.0"),
+                embedding.get("embedding", []),
+                embedding.get("vector_db_id", None),
+                json.dumps(embedding.get("metadata", {}))
+            ))
+        except Exception as e:
+            logging.error(f"Error inserting section embedding with extended schema: {str(e)}")
+            raise
 
 
 def get_section_embedding(section_id: str) -> SectionEmbedding | None:
@@ -489,22 +728,105 @@ def get_section_embedding(section_id: str) -> SectionEmbedding | None:
     """
     conn = get_connection()
     
-    result = conn.execute("""
-    SELECT section_id, embedding
-    FROM section_embeddings
-    WHERE section_id = ?
-    """, (section_id,)).fetchone()
-    
-    if result is None:
-        return None
-    
-    return cast(SectionEmbedding, {
-        "section_id": result[0],
-        "embedding": result[1]
-    })
+    # Check if table has extended schema
+    try:
+        result = conn.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'section_embeddings' AND column_name = 'law_id'
+        """).fetchone()
+        
+        if result is not None:
+            # Table has extended schema - get full data
+            result = conn.execute("""
+            SELECT id, law_id, section_id, segment_id, embedding_model, 
+                   embedding_version, embedding, vector_db_id, metadata
+            FROM section_embeddings
+            WHERE section_id = ?
+            """, (section_id,)).fetchone()
+            
+            if result is None:
+                return None
+            
+            # Return full object but cast as SectionEmbedding for backward compatibility
+            return cast(SectionEmbedding, {
+                "id": result[0],
+                "law_id": result[1],
+                "section_id": result[2],
+                "segment_id": result[3],
+                "embedding_model": result[4],
+                "embedding_version": result[5],
+                "embedding": result[6],
+                "vector_db_id": result[7],
+                "metadata": json.loads(result[8]) if result[8] else {}
+            })
+        else:
+            # Table has old schema
+            result = conn.execute("""
+            SELECT section_id, embedding
+            FROM section_embeddings
+            WHERE section_id = ?
+            """, (section_id,)).fetchone()
+            
+            if result is None:
+                return None
+            
+            return cast(SectionEmbedding, {
+                "section_id": result[0],
+                "embedding": result[1]
+            })
+            
+    except Exception as e:
+        logging.error(f"Error determining schema for section_embeddings retrieval: {str(e)}")
+        # Fall back to original query
+        result = conn.execute("""
+        SELECT section_id, embedding
+        FROM section_embeddings
+        WHERE section_id = ?
+        """, (section_id,)).fetchone()
+        
+        if result is None:
+            return None
+        
+        return cast(SectionEmbedding, {
+            "section_id": result[0],
+            "embedding": result[1]
+        })
 
 
 # Function decorator using Python 3.12 typing
+def ensure_schema_current() -> bool:
+    """
+    Ensure the database schema is up-to-date with the latest version.
+    
+    This is a convenience function that can be called from scripts to ensure
+    all migrations have been applied, including the section_embeddings schema update.
+    
+    Returns:
+        True if the schema is current or was successfully updated
+    """
+    try:
+        current_version = get_db_version()
+        target_version = 3  # Update this as new migrations are added
+        
+        if current_version < target_version:
+            logging.info(f"Updating database schema from version {current_version} to {target_version}")
+            
+            # Apply each missing migration in sequence
+            for version in range(current_version + 1, target_version + 1):
+                logging.info(f"Applying migration {version}")
+                run_migration(version)
+            
+            logging.info(f"Database schema updated to version {target_version}")
+        else:
+            logging.info(f"Database schema is current (version {current_version})")
+        
+        return True
+    except Exception as e:
+        logging.error(f"Failed to update database schema: {str(e)}")
+        return False
+
+
 def with_connection(func: callable) -> callable:
     """
     Decorator to ensure a database connection is available for a function.

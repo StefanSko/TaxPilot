@@ -8,14 +8,12 @@ data directly from DuckDB without requiring a Qdrant vector store.
 import sys
 import time
 from pathlib import Path
-import pandas as pd
-import numpy as np
 
 # Add the project root to the Python path
 project_root = Path(__file__).parents[4]
 sys.path.insert(0, str(project_root))
 
-from taxpilot.backend.data_processing.database import DbConfig, get_connection, close_connection
+from taxpilot.backend.data_processing.database import DbConfig, get_connection, close_connection, ensure_schema_current
 
 
 def run_simplified_demo():
@@ -31,9 +29,18 @@ def run_simplified_demo():
         print(f"Database not found at {db_path}. Please run the data processing pipeline first.")
         return
     
+    # Ensure database schema is current
+    db_config = DbConfig(db_path=str(db_path))
+    print("Checking database schema...")
+    schema_updated = ensure_schema_current()
+    if not schema_updated:
+        print("WARNING: Failed to update database schema. The example may not work correctly.")
+    else:
+        print("Database schema is current.")
+    
     # Connect to the database
     try:
-        conn = get_connection(DbConfig(db_path=str(db_path)))
+        conn = get_connection(db_config)
         
         # Check database contents
         cursor = conn.execute("SELECT COUNT(*) FROM sections")
