@@ -145,7 +145,8 @@ def get_sample_embeddings(section_ids: list[str]) -> list[SectionEmbedding]:
     
     for i, section_id in enumerate(section_ids):
         # Create a unique vector for each section based on its index
-        vector = [float(i + j)/1000 for j in range(384)]
+        # Note: Vector length is now 768 to match the schema used in production
+        vector = [float(i + j)/1000 for j in range(768)]
         embeddings.append({
             "section_id": section_id,
             "embedding": vector
