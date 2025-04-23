@@ -97,7 +97,24 @@ class SearchService:
             cache_size: Size of the results cache
         """
         # Initialize or create services
-        self.vector_db = vector_db or VectorDatabaseManager()
+        if vector_db:
+            self.vector_db = vector_db
+        else:
+            # Check for in-memory mode from environment variables
+            import os
+            from taxpilot.backend.search.vector_db import VectorDbConfig, VectorDbProvider
+            
+            if os.getenv("QDRANT_IN_MEMORY") == "true":
+                logger.info("Using in-memory vector database for search")
+                config = VectorDbConfig(
+                    provider=VectorDbProvider.MEMORY,
+                    collection_name=os.getenv("QDRANT_COLLECTION", "law_sections")
+                )
+                self.vector_db = VectorDatabaseManager(config)
+            else:
+                # Use regular Qdrant connection
+                self.vector_db = VectorDatabaseManager()
+                
         self.embedder = embedder or TextEmbedder()
         self.db_connection = db_connection or DatabaseConnection()
         

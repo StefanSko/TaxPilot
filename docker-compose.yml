@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: taxpilot-qdrant
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    ports:
+      - "6333:6333"
+    environment:
+      - QDRANT_ALLOW_ORIGIN=http://localhost:8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  taxpilot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taxpilot-api
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_COLLECTION=law_sections
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+    command: ["python", "main.py", "serve"]

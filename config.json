@@ -1,0 +1,22 @@
+{
+  "data_dir": "data",
+  "db_path": "data/processed/germanlawfinder.duckdb",
+  "embedding_model": "deepset/gbert-base",
+  "qdrant_url": "http://localhost:6333",
+  "qdrant_collection": "law_sections",
+  "api_host": "127.0.0.1",
+  "api_port": 8000,
+  "log_level": "info",
+  "laws_to_scrape": [
+    "estg",
+    "kstg_1977",
+    "ustg_1980", 
+    "ao_1977", 
+    "gewstg"
+  ],
+  "embedding_dimension": 768,
+  "batch_size": 10,
+  "force_update": false,
+  "enable_swagger": true,
+  "enable_cors": true
+}
