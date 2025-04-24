@@ -115,7 +115,7 @@ class Config:
         """Get configuration for the data processing pipeline."""
         return PipelineConfig(
             db_config=DbConfig(db_path=self.config["db_path"]),
-            force_update=False
+            force_update=True
         )
     
     def get_embedding_config(self) -> EmbeddingConfig:
@@ -310,28 +310,23 @@ def run_indexer(config: Config) -> None:
     # Initialize vector DB manager
     vector_config = config.get_vector_db_config()
     
-    if vector_config.provider == VectorDbProvider.QDRANT:
-        logger.info("Starting vector indexing in Qdrant...")
-        vector_manager = VectorDatabaseManager(vector_config)
-        
-        # Sync DuckDB with Qdrant
-        start_time = time.time()
-        result = vector_manager.synchronize(force_repopulate=False)
-        elapsed = time.time() - start_time
-        
-        logger.info(f"Indexing completed in {elapsed:.2f}s: {result}")
-        
-        # Check if there were errors
-        if result.get("errors", 0) > 0:
-            logger.warning(f"There were {result['errors']} errors during indexing")
-        
-        # Optimize the collection
-        logger.info("Optimizing vector collection...")
-        vector_manager.optimize()
-    else:
-        logger.info("Using in-memory vector database - no indexing required")
-        # Still initialize the vector DB manager to create the in-memory collection
-        vector_manager = VectorDatabaseManager(vector_config)
+    logger.info("Starting vector indexing in Qdrant...")
+    vector_manager = VectorDatabaseManager(vector_config)
+
+    # Sync DuckDB with Qdrant
+    start_time = time.time()
+    result = vector_manager.synchronize(force_repopulate=True)
+    elapsed = time.time() - start_time
+
+    logger.info(f"Indexing completed in {elapsed:.2f}s: {result}")
+
+    # Check if there were errors
+    if result.get("errors", 0) > 0:
+        logger.warning(f"There were {result['errors']} errors during indexing")
+
+    # Optimize the collection
+    logger.info("Optimizing vector collection...")
+    vector_manager.optimize()
 
 
 def run_server(config: Config) -> None:
@@ -414,7 +409,6 @@ def main() -> None:
     # Execute the requested command
     try:
         if args.command == "run-all":
-            run_scraper(config)
             run_processor(config)
             run_embedder(config)
             run_indexer(config)
