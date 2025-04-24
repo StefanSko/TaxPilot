@@ -122,7 +122,7 @@ class SearchParameters:
     article_id: str | None = None  # Filter by article ID
     top_k: int = 10  # Number of results to return
     min_score: float = 0.7  # Minimum similarity score to include
-    embedding_model: str = EmbeddingModelType.DEFAULT.value  # Model to use for embedding
+    embedding_model: str | None = None  # Model to use for embedding
     embedding_version: str | None = None  # Specific version to filter by
     offset: int = 0  # For pagination
     include_metadata: bool = True  # Whether to include metadata in results
@@ -141,7 +141,7 @@ class VectorDatabase:
             config: Optional configuration for the vector database
         """
         self.config = config or VectorDbConfig()
-        self.client: Any = self._initialize_client()
+        self.client: QdrantClient = self._initialize_client()
         
         # Ensure DB config is set
         if self.config.db_config is None:
@@ -150,7 +150,7 @@ class VectorDatabase:
         # Initialize the collection if it doesn't exist
         self._initialize_collection()
     
-    def _initialize_client(self) -> Any:
+    def _initialize_client(self) -> QdrantClient:
         """
         Initialize the vector database client based on the provider.
         
@@ -163,14 +163,14 @@ class VectorDatabase:
                 self.config.local_path.mkdir(parents=True, exist_ok=True)
                 return QdrantClient(
                     path=str(self.config.local_path),
-                    timeout=self.config.timeout
+                    timeout=int(self.config.timeout)
                 )
             else:
                 # Use remote Qdrant instance
                 return QdrantClient(
                     url=self.config.vectors_url,
                     api_key=self.config.api_key,
-                    timeout=self.config.timeout
+                    timeout=int(self.config.timeout)
                 )
         elif self.config.provider == VectorDbProvider.MEMORY:
             # Memory vector store for testing
@@ -483,7 +483,7 @@ class VectorDatabase:
             # Construct basic search parameters
             search_kwargs = {
                 "collection_name": self.config.collection_name,
-                "query_vector": params.query_vector.tolist() if params.query_vector is not None else None,
+                "query": params.query_vector.tolist() if params.query_vector is not None else None,
                 "limit": params.top_k,
                 "with_payload": params.include_metadata,
                 "score_threshold": params.min_score,
@@ -492,67 +492,45 @@ class VectorDatabase:
             
             # Handle filters differently based on local/memory mode or server mode
             if filter_dict is not None:
-                if self.config.provider == VectorDbProvider.MEMORY or self.config.local_path is not None:
-                    # For local/memory mode, we perform the search without filter first
-                    unfiltered_result = self.client.search(**search_kwargs)
-                    
-                    # Then manually filter the results
-                    filtered_result = []
-                    for hit in unfiltered_result:
-                        if hit.payload:
-                            # Check all filter conditions
-                            matches_all = True
-                            for condition in filter_dict.must:
-                                if isinstance(condition, FieldCondition) and isinstance(condition.match, MatchValue):
-                                    field_value = hit.payload.get(condition.key)
-                                    if field_value != condition.match.value:
-                                        matches_all = False
-                                        break
-                            
-                            if matches_all:
-                                filtered_result.append(hit)
-                    
-                    search_result = filtered_result
-                else:
-                    # For server mode, use the filter directly
-                    search_kwargs["filter"] = filter_dict
-                    search_result = self.client.search(**search_kwargs)
+                # For server mode, use the filter directly
+                search_kwargs["query_filter"] = filter_dict
+                search_result = self.client.query_points(**search_kwargs)
             else:
                 # No filter, perform normal search
-                search_result = self.client.search(**search_kwargs)
+                search_result = self.client.query_points(**search_kwargs)
+
             
             # Convert to our result format
             results = []
-            for hit in search_result:
-                if hit.payload:
-                    # Extract hierarchical information if available
-                    article_id = hit.payload.get("article_id", "")
-                    hierarchy_path = hit.payload.get("hierarchy_path", "")
-                    segment_type = hit.payload.get("segment_type", "")
-                    position_in_parent = hit.payload.get("position_in_parent", 0)
+            for hit in search_result.points:
+                # Extract hierarchical information if available
+                article_id = hit.payload.get("article_id", "")
+                hierarchy_path = hit.payload.get("hierarchy_path", "")
+                segment_type = hit.payload.get("segment_type", "")
+                position_in_parent = hit.payload.get("position_in_parent", 0)
                     
-                    # Construct the result
-                    result = SearchResult(
-                        segment_id=hit.payload.get("segment_id", ""),
-                        law_id=hit.payload.get("law_id", ""),
-                        section_id=hit.payload.get("section_id", ""),
-                        score=float(hit.score) if hit.score is not None else 0.0,
-                        metadata={
-                            k: v for k, v in hit.payload.items()
-                            if k not in [
-                                "law_id", "section_id", "segment_id", 
-                                "embedding_model", "embedding_version",
-                                "article_id", "hierarchy_path", "segment_type", "position_in_parent"
-                            ]
-                        },
-                        embedding_model=hit.payload.get("embedding_model", ""),
-                        embedding_version=hit.payload.get("embedding_version", ""),
-                        article_id=article_id,
-                        hierarchy_path=hierarchy_path,
-                        segment_type=segment_type,
-                        position_in_parent=position_in_parent
-                    )
-                    results.append(result)
+                # Construct the result
+                result = SearchResult(
+                    segment_id=hit.payload.get("segment_id", ""),
+                    law_id=hit.payload.get("law_id", ""),
+                    section_id=hit.payload.get("section_id", ""),
+                    score=float(hit.score) if hit.score is not None else 0.0,
+                    metadata={
+                        k: v for k, v in hit.payload.items()
+                        if k not in [
+                            "law_id", "section_id", "segment_id",
+                            "embedding_model", "embedding_version",
+                            "article_id", "hierarchy_path", "segment_type", "position_in_parent"
+                        ]
+                    },
+                    embedding_model=hit.payload.get("embedding_model", ""),
+                    embedding_version=hit.payload.get("embedding_version", ""),
+                    article_id=article_id,
+                    hierarchy_path=hierarchy_path,
+                    segment_type=segment_type,
+                    position_in_parent=position_in_parent
+                )
+                results.append(result)
             
             # Rank results by combined score
             results.sort(key=lambda x: x.combined_score, reverse=True)
