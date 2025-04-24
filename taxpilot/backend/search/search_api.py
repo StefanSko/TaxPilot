@@ -337,7 +337,7 @@ class SearchService:
         segment_to_section_map = {}
         for res in search_results:
             # Use the section_id stored in the payload during indexing
-            payload_section_id = res.metadata.get("section_id") 
+            payload_section_id = res.section_id
             if payload_section_id:
                 section_ids_to_lookup.add(payload_section_id)
                 segment_to_section_map[res.segment_id] = payload_section_id
