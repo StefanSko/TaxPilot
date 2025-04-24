@@ -263,11 +263,10 @@ def run_embedder(config: Config) -> None:
                 # Create a TextEmbedding object with the vector
                 embedding = TextEmbedding(
                     vector=vector,
-                    text=content[:200],  # Just store a preview
                     law_id=law_id,
                     section_id=section_id,
                     segment_id=section_id,
-                    embedding_model=embedder.model_name,
+                    embedding_model=embedder.model,
                     embedding_version="1.0.0",
                     metadata={
                         "title": title,

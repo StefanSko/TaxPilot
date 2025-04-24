@@ -4,7 +4,8 @@ Database module for GermanLawFinder.
 This module provides database connection, initialization, and schema management
 functions for working with DuckDB in a serverless environment.
 """
-
+import hashlib
+import json
 import os
 from pathlib import Path
 from typing import TypedDict, NotRequired, Any, cast, Optional
@@ -12,8 +13,7 @@ from pydantic import BaseModel, Field
 import duckdb
 from datetime import date
 import logging
-from dataclasses import dataclass
-
+import uuid
 
 # Type definitions using Python 3.12 typing features
 class Law(TypedDict):
@@ -635,9 +635,6 @@ def insert_section_embedding(embedding: SectionEmbedding) -> None:
             """).fetchone()
             
             if result is not None:
-                # Table has extended schema but old-style embedding input
-                # Generate an ID and get law_id from sections table
-                import uuid
                 
                 embedding_id = str(uuid.uuid4())
                 
@@ -693,6 +690,11 @@ def insert_section_embedding(embedding: SectionEmbedding) -> None:
         try:
             # If id is not provided, generate one
             embedding_id = embedding.get("id", str(uuid.uuid4()))
+            hex_string = hashlib.md5(embedding_id.encode("UTF-8")).hexdigest()
+            embedding_id = str(uuid.UUID(hex=hex_string))
+
+
+            embedding_model = str(embedding.get("embedding_model", "default"))
             
             conn.execute("""
             INSERT INTO section_embeddings (
@@ -705,7 +707,7 @@ def insert_section_embedding(embedding: SectionEmbedding) -> None:
                 embedding.get("law_id", ""),
                 embedding.get("section_id", ""),
                 embedding.get("segment_id", ""),
-                embedding.get("embedding_model", "default"),
+                embedding_model,
                 embedding.get("embedding_version", "1.0.0"),
                 embedding.get("embedding", []),
                 embedding.get("vector_db_id", None),
