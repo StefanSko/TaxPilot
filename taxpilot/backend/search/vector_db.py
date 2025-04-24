@@ -172,9 +172,6 @@ class VectorDatabase:
                     api_key=self.config.api_key,
                     timeout=int(self.config.timeout)
                 )
-        elif self.config.provider == VectorDbProvider.MEMORY:
-            # Memory vector store for testing
-            return QdrantClient(":memory:")
         else:
             # Raise custom exception
             raise VectorDBError(f"Unsupported provider: {self.config.provider}")
@@ -316,9 +313,6 @@ class VectorDatabase:
                 ]
             )
             logger.debug(f"Stored embedding with ID {point_id}")
-            
-            # No longer need to update DuckDB reference here, it's handled during embedding storage
-            # self._update_duckdb_reference(embedding, point_id)
             
             return point_id
         except Exception as e:
@@ -555,7 +549,7 @@ class VectorDatabase:
         try:
             # In memory mode, we need to scroll through all points
             # and filter manually since filter param might not be supported
-            if self.config.provider == VectorDbProvider.MEMORY or self.config.local_path is not None:
+            if self.config.local_path is not None:
                 scroll_results = self.client.scroll(
                     collection_name=self.config.collection_name,
                     with_payload=True,
